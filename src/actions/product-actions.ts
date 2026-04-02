@@ -22,80 +22,53 @@ export async function createProduct(formData: FormData) {
     const unit_measure = formData.get("unit_measure") as string;
     const description = formData.get("description") as string;
     
-    // OJO: Ya no validamos 'code' aquí porque se genera abajo
     if (!name || !unit_measure) {
         return { success: false, message: "El nombre y la unidad son obligatorios." };
     }
 
-    const connection = await pool.getConnection();
-
     try {
-        await connection.beginTransaction();
+        // Ejecutamos el Stored Procedure que genera el código y hace el INSERT
+        const [results]: any = await pool.query(
+            "CALL sp_crear_producto(?, ?, ?, ?)",
+            [name.toUpperCase(), description || null, unit_measure, session.user.id]
+        );
 
-        // 1. GENERAR CÓDIGO AUTOMÁTICO (Ej: PROD-000052)
-        const [lastRow]: any = await connection.query("SELECT MAX(id) as max_id FROM products");
-        const nextId = (lastRow[0]?.max_id || 0) + 1;
-        const autoCode = `PROD-${nextId.toString().padStart(6, '0')}`;
+        // El SP devuelve el ID generado y el código (Ej: PROD-000052) en el primer set de resultados
+        const newProductData = results[0] ? results[0][0] : null;
 
-        // 2. INSERTAR EN BASE DE DATOS
-        // Usamos session.user.id para 'created_by'
-        const [result]: any = await connection.query(`
-            INSERT INTO products (
-                name, 
-                code, 
-                description, 
-                unit_measure, 
-                status, 
-                created_by, 
-                created_at
-            )
-            VALUES (?, ?, ?, ?, 1, ?, NOW())
-        `, [
-            name.toUpperCase(), 
-            autoCode, 
-            description || null, 
-            unit_measure, 
-            session.user.id 
-        ]);
+        if (!newProductData) {
+            throw new Error("No se devolvieron datos del producto creado.");
+        }
 
-        const newId = result.insertId;
-
-        await connection.commit();
-
-        // Revalidamos las rutas para que la lista se actualice
+        // Revalidamos las rutas para que la lista se actualice en la UI
         revalidatePath("/admin/productos");
         revalidatePath("/inventario"); 
         
         // Devolvemos el producto creado para usarlo en el frontend
         return { 
             success: true, 
-            message: `Producto creado: ${autoCode}`,
+            message: `Producto creado: ${newProductData.code}`,
             product: {
-                id: newId,
+                id: newProductData.id,
                 name: name.toUpperCase(),
-                code: autoCode,
+                code: newProductData.code,
                 unit_measure: unit_measure
             }
         };
 
     } catch (error: any) {
-        await connection.rollback();
         console.error("Error creando producto:", error);
-        return { success: false, message: error.message || "Error en base de datos" };
-    } finally {
-        connection.release();
+        // Capturamos mensajes nativos de MySQL si los hay (sqlMessage)
+        return { success: false, message: error.sqlMessage || error.message || "Error en base de datos" };
     }
 }
 
 // --- LISTAR PRODUCTOS ---
 export async function getProductsList() {
     try {
-        const [rows]: any = await pool.query(`
-            SELECT * FROM products 
-            WHERE status = 1 
-            ORDER BY created_at DESC
-        `);
-        return rows;
+        // Llamada limpia al Stored Procedure
+        const [results]: any = await pool.query("CALL sp_listar_productos()");
+        return results[0] || [];
     } catch (error) {
         console.error("Error al listar productos:", error);
         return [];

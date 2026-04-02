@@ -1,8 +1,10 @@
 import { pool } from "@/lib/db";
 import { auth } from "@/auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Package, AlertTriangle, AlertCircle, CheckCircle2 } from "lucide-react"; // Nuevos iconos
+import { Package, AlertTriangle, AlertCircle } from "lucide-react"; 
 import { getBranches } from "@/actions/purchase-actions"; 
+// IMPORTAMOS LA FUNCIÓN DEL CEREBRO QUE CREASTE HOY:
+import { getInventoryStocks } from "@/actions/inventory-actions"; 
 import { InventoryTable } from "./inventory-table";
 import { InventoryActionsButton } from "@/components/modules/inventario/inventory-actions-button";
 import { InventoryFilters } from "@/components/modules/inventario/inventory-filters";
@@ -34,73 +36,31 @@ export default async function InventoryPage(props: {
         } catch (error) { console.error(error); }
     }
 
-    // Listas auxiliares
+    // Listas auxiliares para los filtros desplegables
     const [productsList]: any = await pool.query("SELECT id, name, code FROM products WHERE status = 1 ORDER BY name ASC");
     const branches = await getBranches();
 
-    // --- FILTROS ---
-    const queryTerm = searchParams?.query || "";
-    const branchFilter = searchParams?.branchId || "";
-    
-    let whereClause = "WHERE p.status = 1";
-    const queryParams: any[] = [];
+    // 2. CAPTURAMOS LOS FILTROS DE LA URL (Lo que manda tu botón Aplicar)
+    const branch_id = searchParams.branchId && searchParams.branchId !== "ALL" ? Number(searchParams.branchId) : null;
+    const search = searchParams.query || null;
+    const min_stock = searchParams.minStock ? Number(searchParams.minStock) : null;
+    const max_stock = searchParams.maxStock ? Number(searchParams.maxStock) : null;
+    const updated_from = searchParams.dateFrom || null;
 
-    if (queryTerm) {
-        whereClause += " AND (p.name LIKE ? OR p.code LIKE ?)";
-        queryParams.push(`%${queryTerm}%`, `%${queryTerm}%`);
-    }
-
-    if (branchFilter && branchFilter !== "ALL") {
-        whereClause += " AND ps.branch_id = ?";
-        queryParams.push(branchFilter);
-    }
-
-    // --- CONSULTA PRINCIPAL MEJORADA ---
-    // Agregamos lógica CASE para determinar el nivel de alerta directamente desde SQL
-    // y una subconsulta (LEFT JOIN) para detectar cuántos items vencen en los próximos 30 días.
-    const sql = `
-        SELECT 
-            ps.id, ps.branch_id, ps.product_id,
-            b.name as branch_name,
-            p.code as product_code, p.name as product_name, p.unit_measure,
-            ps.stock_current, 
-            ps.min_stock, 
-            ps.reorder_point,
-            ps.last_update,
-            
-            -- Lógica de Semáforo de Stock
-            CASE 
-                WHEN ps.stock_current <= ps.min_stock THEN 'CRITICAL'
-                WHEN ps.stock_current <= ps.reorder_point THEN 'WARNING'
-                ELSE 'OK'
-            END as stock_status,
-
-            -- Subconsulta para alertas de Vencimiento (Próximos 30 días)
-            -- Nota: Esto requiere la tabla 'product_batches'. Si no la tienes, devolverá NULL/0
-            COALESCE(
-                (SELECT SUM(quantity) 
-                 FROM product_batches pb 
-                 WHERE pb.product_id = ps.product_id 
-                 AND pb.branch_id = ps.branch_id 
-                 AND pb.expiration_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)
-                ), 0
-            ) as expiring_soon_qty
-
-        FROM product_stocks ps
-        INNER JOIN products p ON ps.product_id = p.id
-        INNER JOIN branches b ON ps.branch_id = b.id
-        ${whereClause}
-        ORDER BY 
-            -- Priorizar alertas críticas arriba
-            (ps.stock_current <= ps.min_stock) DESC, 
-            b.name ASC, p.name ASC
-    `;
-
-    const [stocks]: any = await pool.query(sql, queryParams);
+    // 3. LLAMAMOS AL "CEREBRO" CON TODOS LOS FILTROS
+    const stocks = await getInventoryStocks({
+        branch_id,
+        search,
+        min_stock,
+        max_stock,
+        updated_from
+    });
 
     // Cálculos de KPI rápidos para el Header
-    const criticalCount = stocks.filter((s: any) => s.stock_status === 'CRITICAL').length;
-    const expiringCount = stocks.reduce((acc: number, curr: any) => acc + (Number(curr.expiring_soon_qty) || 0), 0);
+    // (Ajustamos para leer el stock de forma segura)
+    const criticalCount = stocks.filter((s: any) => s.stock_current <= (s.min_stock || 0)).length;
+    // Omitimos expiringCount por ahora si no viene del SP, o lo dejamos en 0.
+    const expiringCount = 0; 
 
     return (
         <div className="p-6 space-y-6 max-w-[1400px] mx-auto">
@@ -122,15 +82,6 @@ export default async function InventoryPage(props: {
                             <div className="flex flex-col leading-none">
                                 <span className="font-bold text-lg">{criticalCount}</span>
                                 <span className="text-[10px] uppercase font-semibold">Stock Crítico</span>
-                            </div>
-                        </div>
-                    )}
-                    {expiringCount > 0 && (
-                        <div className="flex items-center gap-2 px-4 py-2 bg-orange-50 border border-orange-200 rounded-lg text-orange-800 shadow-sm">
-                            <AlertTriangle className="w-5 h-5" />
-                            <div className="flex flex-col leading-none">
-                                <span className="font-bold text-lg">{expiringCount}</span>
-                                <span className="text-[10px] uppercase font-semibold">Vencen pronto</span>
                             </div>
                         </div>
                     )}
@@ -161,7 +112,7 @@ export default async function InventoryPage(props: {
                     <CardTitle className="text-base font-medium text-gray-700">Tablero de Existencias</CardTitle>
                 </CardHeader>
                 <CardContent className="p-0">
-                    {/* Pasamos los datos enriquecidos a la tabla */}
+                    {/* Pasamos los datos filtrados a la tabla */}
                     <InventoryTable stocks={stocks} />
                 </CardContent>
             </Card>

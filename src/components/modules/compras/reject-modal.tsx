@@ -13,10 +13,10 @@ interface RejectModalProps {
     requestId: number;
     open: boolean;
     onOpenChange: (open: boolean) => void;
+    onSuccess?: () => void; // <--- SE AGREGÓ ESTA LÍNEA
 }
 
-// ⚠️ Asegúrate de que esta línea tenga la palabra 'export' al inicio
-export function RejectModal({ requestId, open, onOpenChange }: RejectModalProps) {
+export function RejectModal({ requestId, open, onOpenChange, onSuccess }: RejectModalProps) {
     const [reason, setReason] = useState("");
     const [loading, setLoading] = useState(false);
 
@@ -33,7 +33,8 @@ export function RejectModal({ requestId, open, onOpenChange }: RejectModalProps)
         if (res.success) {
             toast.success(res.message);
             onOpenChange(false);
-            setReason(""); // Limpiar
+            setReason(""); 
+            if (onSuccess) onSuccess(); // <--- SE LLAMA A LA FUNCIÓN AL TERMINAR
         } else {
             toast.error(res.message);
         }

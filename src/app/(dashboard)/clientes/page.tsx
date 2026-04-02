@@ -33,27 +33,38 @@ export default async function ClientsPage() {
                 <TableHead>Documento</TableHead>
                 <TableHead>Contacto</TableHead>
                 <TableHead>Estado</TableHead>
-                {/* 1. COLUMNA NUEVA PARA ACCIONES */}
                 <TableHead className="text-right">Acciones</TableHead> 
               </TableRow>
             </TableHeader>
             <TableBody>
               {clients.map((client: any) => (
                 <TableRow key={client.id} className="hover:bg-blue-50/30 transition-colors">
+                  
+                  {/* COLUMNA: CLIENTE (Agregamos respaldos por si la columna se llama diferente en tu BD) */}
                   <TableCell>
                     <div className="flex flex-col">
-                        <span className="font-medium text-gray-900 text-sm">{client.display_name}</span>
+                        <span className="font-medium text-gray-900 text-sm">
+                            {client.display_name || client.name || client.razon_social || client.business_name || "Sin Nombre"}
+                        </span>
                         <span className="text-[11px] text-muted-foreground uppercase tracking-wide font-semibold">
-                            {client.client_type_desc}
+                            {client.client_type_desc || client.client_type || client.tipo_cliente || "CLIENTE"}
                         </span>
                     </div>
                   </TableCell>
+
+                  {/* COLUMNA: DOCUMENTO (Agregamos respaldos) */}
                   <TableCell>
                     <div className="flex flex-col">
-                        <span className="font-mono text-sm font-medium text-gray-700">{client.doc_number}</span>
-                        <span className="text-xs text-gray-400">{client.doc_internal_code}</span>
+                        <span className="font-mono text-sm font-medium text-gray-700">
+                            {client.doc_number || client.document_number || client.numero_documento || "S/N"}
+                        </span>
+                        <span className="text-xs text-gray-400">
+                            {client.doc_internal_code || client.doc_type || client.document_type || client.tipo_documento || "DOC"}
+                        </span>
                     </div>
                   </TableCell>
+
+                  {/* COLUMNA: CONTACTO (Esta ya funcionaba bien según tu foto) */}
                   <TableCell>
                     <div className="flex flex-col gap-1">
                         {client.email ? (
@@ -67,6 +78,8 @@ export default async function ClientsPage() {
                         ) : null}
                     </div>
                   </TableCell>
+
+                  {/* COLUMNA: ESTADO */}
                   <TableCell>
                     <Badge 
                         className={client.status === 1 
@@ -77,7 +90,7 @@ export default async function ClientsPage() {
                     </Badge>
                   </TableCell>
                   
-                  {/* 2. AQUÍ SE RENDERIZAN LOS PUNTITOS */}
+                  {/* COLUMNA: ACCIONES (LOS PUNTITOS) */}
                   <TableCell className="text-right">
                     <ClientActions client={client} />
                   </TableCell>

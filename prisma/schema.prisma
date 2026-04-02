@@ -1,0 +1,19 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// Agrega este modelo para que Prisma sepa que existe la tabla providers
+model providers {
+  id      Int    @id @default(autoincrement())
+  ruc     String @unique
+  name    String
+  address String?
+  estado  Int    @default(1)
+}

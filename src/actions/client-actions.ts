@@ -8,7 +8,7 @@ import { revalidatePath } from "next/cache";
 async function getCatalog(category: string) {
   try {
     const [rows]: any = await pool.query("CALL sp_listar_catalogo(?)", [category]);
-    return rows[0]; 
+    return rows[0] || []; 
   } catch (error) {
     console.error(`Error catalogo ${category}:`, error);
     return [];
@@ -25,7 +25,7 @@ export async function getClientTypes() {
     id: item.id,
     description: item.description,
     internal_code: item.code, // 'NAT' o 'JUR'
-    sunat_code: item.num_1    // Código numérico
+    sunat_code: item.num_1    // Código numérico SUNAT
   }));
 }
 
@@ -33,9 +33,9 @@ export async function getDocumentTypes() {
   const data = await getCatalog('DOC_TYPE');
   return data.map((item: any) => ({
     id: item.id,
-    description: item.description,
-    internal_code: item.code, // 'DNI', 'RUC'
-    sunat_code: item.num_1    // '1', '6'
+    description: item.description || "Sin nombre",
+    internal_code: item.code || item.description, 
+    sunat_code: item.num_1
   }));
 }
 
@@ -44,7 +44,7 @@ export async function getCountries() {
   return data.map((item: any) => ({
     id: item.id,
     label: item.description,
-    value: item.description  // Guardamos el nombre del país
+    value: item.description  // Guardamos el nombre del país para el select
   }));
 }
 
@@ -56,9 +56,9 @@ export async function getCountries() {
 export async function getClients() {
   try {
     const [rows]: any = await pool.query("CALL sp_listar_clientes()");
-    return rows[0];
+    return rows[0] || [];
   } catch (error) {
-    console.error(error);
+    console.error("Error al listar clientes:", error);
     return [];
   }
 }
@@ -67,9 +67,9 @@ export async function getClients() {
 export async function getClientById(id: number) {
   try {
     const [rows]: any = await pool.query("CALL sp_obtener_cliente(?)", [id]);
-    return rows[0][0]; // Retorna el objeto cliente limpio
+    return rows[0] ? rows[0][0] : null; // Retorna el objeto cliente limpio o null si no existe
   } catch (error) {
-    console.error(error);
+    console.error("Error al obtener cliente:", error);
     return null;
   }
 }
@@ -86,7 +86,7 @@ export async function createClient(prevState: any, formData: FormData) {
   
   // Datos de control
   const client_type_id = formData.get("client_type_id"); 
-  const client_code = formData.get("client_code"); 
+  const client_code = formData.get("client_code"); // 'NAT' o 'JUR'
   
   // Datos comunes
   const doc_type_id = formData.get("doc_type_id");
@@ -104,45 +104,25 @@ export async function createClient(prevState: any, formData: FormData) {
 
   try {
     if (client_code === 'NAT') { 
-      // PERSONA NATURAL
-      const first_name = formData.get("first_name");
-      const paternal = formData.get("paternal_surname");
-      const maternal = formData.get("maternal_surname");
-
+      // PERSONA NATURAL (15 Parámetros exactos)
       await pool.query(
         "CALL sp_crear_persona(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
         [
             userId, client_type_id, doc_type_id, doc_number, 
-            first_name, paternal, maternal, 
+            formData.get("first_name"), formData.get("paternal_surname"), formData.get("maternal_surname"), 
             email, phone, address,
             country, department, province, district, zip_code
         ]
       );
-
     } else { 
-      // EMPRESA JURIDICA
-      const business_name = formData.get("business_name");
-      const trade_name = formData.get("trade_name");
-
-      // CORRECCIÓN: Aquí deben haber EXACTAMENTE 14 signos de interrogación '?'
-      // (Antes habían 15 y por eso fallaba la sintaxis MySQL)
+      // EMPRESA JURÍDICA (14 Parámetros exactos)
       await pool.query(
         "CALL sp_crear_empresa(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
         [
-            userId,           // 1
-            client_type_id,   // 2
-            doc_type_id,      // 3
-            doc_number,       // 4
-            business_name,    // 5
-            trade_name,       // 6
-            email,            // 7
-            phone,            // 8
-            address,          // 9
-            country,          // 10
-            department,       // 11
-            province,         // 12
-            district,         // 13
-            zip_code          // 14
+            userId, client_type_id, doc_type_id, doc_number, 
+            formData.get("business_name"), formData.get("trade_name"), 
+            email, phone, address, 
+            country, department, province, district, zip_code
         ]
       );
     }
@@ -183,28 +163,23 @@ export async function updateClient(prevState: any, formData: FormData) {
 
   try {
     if (client_code === 'NAT') {
-      const first_name = formData.get("first_name");
-      const paternal = formData.get("paternal_surname");
-      const maternal = formData.get("maternal_surname");
-
+      // PERSONA NATURAL (13 Parámetros exactos)
       await pool.query(
         "CALL sp_editar_persona(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
         [
             client_id, userId, 
-            first_name, paternal, maternal, 
+            formData.get("first_name"), formData.get("paternal_surname"), formData.get("maternal_surname"), 
             email, phone, address, 
             country, department, province, district, zip_code
         ]
       );
     } else {
-      const business_name = formData.get("business_name");
-      const trade_name = formData.get("trade_name");
-
+      // EMPRESA JURÍDICA (12 Parámetros exactos)
       await pool.query(
         "CALL sp_editar_empresa(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
         [
             client_id, userId, 
-            business_name, trade_name, 
+            formData.get("business_name"), formData.get("trade_name"), 
             email, phone, address, 
             country, department, province, district, zip_code
         ]
@@ -214,7 +189,7 @@ export async function updateClient(prevState: any, formData: FormData) {
     revalidatePath("/clientes");
     return { success: true, message: "Cliente actualizado correctamente" };
   } catch (error: any) {
-    return { success: false, message: error.message || "Error al actualizar" };
+    return { success: false, message: error.sqlMessage || "Error al actualizar" };
   }
 }
 
@@ -227,13 +202,13 @@ export async function deleteClient(clientId: number) {
   if (!session?.user?.id) return { success: false, message: "No autorizado" };
 
   try {
-    // Eliminación lógica (deleted_at)
+    // Eliminación lógica usando Stored Procedure
     await pool.query("CALL sp_eliminar_cliente(?, ?)", [clientId, session.user.id]);
     
     revalidatePath("/clientes");
     return { success: true, message: "Cliente eliminado correctamente" };
   } catch (error: any) {
-    console.error(error);
+    console.error("Error al eliminar el cliente:", error);
     return { success: false, message: "Error al eliminar el cliente" };
   }
 }

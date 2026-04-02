@@ -51,17 +51,22 @@ export function ClientFormSheet({ clientId, mode = 'create', isOpen, onOpenChang
   const action = mode === 'edit' ? updateClient : createClient;
   const [state, dispatch, isPending] = useActionState(action, null);
 
-  // --- FILTRADO ---
-  const filterDocs = (type: any, docs: any[], defaultId?: string) => {
+const filterDocs = (type: any, docs: any[], defaultId?: string) => {
     if (!type || !docs.length) return;
     let validDocs = [];
+    
     if (type.internal_code === 'NAT') {
-        validDocs = docs.filter(d => d.internal_code !== 'RUC');
+        // CAMBIO AQUÍ: Ahora 'validDocs = docs' permite que pasen TODOS los documentos (DNI, PASAPORTE y RUC)
+        validDocs = docs; 
+        
         if (!defaultId) defaultId = validDocs.find(d => d.internal_code === 'DNI')?.id.toString();
     } else {
+        // La Persona Jurídica se queda igual: SOLO puede usar RUC
         validDocs = docs.filter(d => d.internal_code === 'RUC');
+        
         if (!defaultId) defaultId = validDocs.find(d => d.internal_code === 'RUC')?.id.toString();
     }
+    
     setFilteredDocs(validDocs);
     if(defaultId) setSelectedDocId(defaultId);
   };
@@ -181,10 +186,16 @@ export function ClientFormSheet({ clientId, mode = 'create', isOpen, onOpenChang
                         <div className="col-span-12 sm:col-span-5 space-y-2">
                             <Label className="text-xs font-semibold text-gray-600">Tipo Documento <Req /></Label>
                             <Select key={selectedType?.internal_code} name="doc_type_id" value={selectedDocId} onValueChange={setSelectedDocId} disabled={mode === 'edit'}> 
-                                <SelectTrigger className="w-full bg-gray-50 border-gray-200 h-10"><SelectValue placeholder="Seleccionar" /></SelectTrigger>
-                                <SelectContent className="max-h-[200px] bg-white z-[9999]">
+                                <SelectTrigger className="w-full bg-gray-50 border-gray-200 h-10 overflow-hidden">
+  <div className="truncate text-left w-full">
+    <SelectValue placeholder="Seleccionar" />
+  </div>
+</SelectTrigger>
+                                <SelectContent className="max-h-[200px] bg-white">
                                     {filteredDocs.map((dt) => (
-                                        <SelectItem key={dt.id} value={dt.id.toString()}>{dt.internal_code}</SelectItem>
+                                        <SelectItem key={dt.id} value={dt.id.toString()}>
+  {dt.description} {/* Esto mostrará "DNI - DOC. NACIONAL..." en lugar de solo "DNI" */}
+</SelectItem>
                                     ))}
                                 </SelectContent>
                             </Select>

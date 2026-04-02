@@ -18,14 +18,13 @@ import { InventoryHistoryDialog } from "@/components/modules/inventario/inventor
 export function InventoryTable({ stocks }: { stocks: any[] }) {
     const [selectedItem, setSelectedItem] = useState<any>(null);
 
-    // Función auxiliar para obtener estilos según el estado
     const getStockBadgeStyles = (status: string) => {
         switch (status) {
             case 'CRITICAL':
                 return "bg-red-50 text-red-700 border-red-200 hover:bg-red-100";
             case 'WARNING':
                 return "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100";
-            default: // OK
+            default:
                 return "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100";
         }
     };
@@ -39,7 +38,7 @@ export function InventoryTable({ stocks }: { stocks: any[] }) {
                         <TableHead className="w-[100px]">Código</TableHead>
                         <TableHead>Producto</TableHead>
                         <TableHead className="text-right">Stock Actual</TableHead>
-                        <TableHead className="w-[160px]">Alertas / Venc.</TableHead> {/* Nueva Columna */}
+                        <TableHead className="w-[160px]">Alertas / Venc.</TableHead>
                         <TableHead className="text-right w-[120px]">Última Act.</TableHead>
                         <TableHead className="w-[50px]"></TableHead>
                     </TableRow>
@@ -48,7 +47,6 @@ export function InventoryTable({ stocks }: { stocks: any[] }) {
                     {stocks.map((item) => (
                         <TableRow key={item.id} className="hover:bg-slate-50 transition-colors group">
                             
-                            {/* SUCURSAL */}
                             <TableCell className="font-medium text-gray-600">
                                 <div className="flex items-center gap-2">
                                     <MapPin className="w-4 h-4 text-gray-400" />
@@ -56,17 +54,14 @@ export function InventoryTable({ stocks }: { stocks: any[] }) {
                                 </div>
                             </TableCell>
                             
-                            {/* CÓDIGO */}
                             <TableCell className="font-mono text-xs text-gray-500">
                                 {item.product_code || '-'}
                             </TableCell>
                             
-                            {/* PRODUCTO */}
                             <TableCell className="font-bold text-gray-800">
                                 {item.product_name}
                             </TableCell>
                             
-                            {/* STOCK CON SEMÁFORO */}
                             <TableCell className="text-right">
                                 <div className="flex justify-end">
                                     <Badge 
@@ -81,7 +76,6 @@ export function InventoryTable({ stocks }: { stocks: any[] }) {
                                             'Stock Saludable'
                                         }
                                     >
-                                        {/* Icono dinámico */}
                                         {item.stock_status === 'CRITICAL' && <AlertCircle className="w-3.5 h-3.5" />}
                                         {item.stock_status === 'WARNING' && <AlertTriangle className="w-3.5 h-3.5" />}
                                         {item.stock_status === 'OK' && <CheckCircle2 className="w-3.5 h-3.5 opacity-50" />}
@@ -91,7 +85,6 @@ export function InventoryTable({ stocks }: { stocks: any[] }) {
                                 </div>
                             </TableCell>
 
-                            {/* ALERTAS DE VENCIMIENTO (NUEVO) */}
                             <TableCell>
                                 {Number(item.expiring_soon_qty) > 0 ? (
                                     <div className="flex items-center gap-1.5 text-orange-700 bg-orange-50 border border-orange-100 px-2 py-1 rounded-md w-fit">
@@ -106,12 +99,10 @@ export function InventoryTable({ stocks }: { stocks: any[] }) {
                                 )}
                             </TableCell>
 
-                            {/* FECHA */}
                             <TableCell className="text-xs text-gray-400 text-right">
                                 {item.last_update ? new Date(item.last_update).toLocaleDateString() : '-'}
                             </TableCell>
                             
-                            {/* BOTÓN DETALLE */}
                             <TableCell>
                                 <Button 
                                     variant="ghost" 
@@ -126,7 +117,6 @@ export function InventoryTable({ stocks }: { stocks: any[] }) {
                         </TableRow>
                     ))}
 
-                    {/* ESTADO VACÍO */}
                     {stocks.length === 0 && (
                         <TableRow>
                             <TableCell colSpan={7} className="text-center py-16 text-gray-400">
@@ -140,21 +130,14 @@ export function InventoryTable({ stocks }: { stocks: any[] }) {
                 </TableBody>
             </Table>
 
-            {/* MODAL DE HISTORIAL */}
             {selectedItem && (
                 <InventoryHistoryDialog 
                     isOpen={!!selectedItem} 
                     onOpenChange={(open) => !open && setSelectedItem(null)}
-                    
-                    // IDs
                     branchId={selectedItem.branch_id}
                     productId={selectedItem.product_id}
-                    
-                    // Info
                     productName={selectedItem.product_name}
                     branchName={selectedItem.branch_name}
-                    
-                    // Datos extra
                     currentStock={selectedItem.stock_current}
                     unitMeasure={selectedItem.unit_measure}
                     lastUpdate={selectedItem.last_update}

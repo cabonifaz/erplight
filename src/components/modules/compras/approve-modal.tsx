@@ -13,9 +13,10 @@ import { cn } from "@/lib/utils";
 interface ApproveModalProps {
     requestId: number;
     requestDesc: string;
+    onSuccess?: () => void; // Agregado para refrescar la tabla al aprobar
 }
 
-export function ApproveModal({ requestId, requestDesc }: ApproveModalProps) {
+export function ApproveModal({ requestId, requestDesc, onSuccess }: ApproveModalProps) {
     const [open, setOpen] = useState(false);
     const [loading, setLoading] = useState(false);
     const [fetching, setFetching] = useState(false);
@@ -44,6 +45,7 @@ export function ApproveModal({ requestId, requestDesc }: ApproveModalProps) {
         if (res.success) {
             toast.success(res.message);
             setOpen(false);
+            if (onSuccess) onSuccess(); // Dispara la recarga de datos en la hoja principal
         } else {
             toast.error(res.message);
         }

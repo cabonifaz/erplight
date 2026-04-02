@@ -23,8 +23,10 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           );
 
           const user = result[0]?.[0];
-
           if (!user) return null;
+
+          // 🚨 EL CHISMOSO: Mira en tu terminal qué devuelve realmente la BD
+          console.log("DATOS REALES QUE TRAE LA BD:", user);
 
           const passwordsMatch = await bcrypt.compare(
             credentials.password as string,
@@ -32,21 +34,18 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           );
 
           if (passwordsMatch) {
-            // Lógica defensiva para detectar Sucursal y Rol (por si cambian nombres de columnas)
             const sucursalDetectada = user.branch_name || user.sucursal || user.nombre_sucursal || "Sin Sucursal";
-            const rolDetectado = user.role || user.code || user.rol;
+            const rolDetectado = user.role || user.code || user.rol || "SIN_ROL";
 
             return {
               id: user.id.toString(),
               name: user.name,
               email: user.email,
-              role: rolDetectado, // <--- Dato crucial para la validación
+              role: rolDetectado, 
               branch_name: sucursalDetectada, 
             };
           }
-          
           return null;
-
         } catch (error) {
           console.error("Auth error:", error);
           return null;
@@ -55,21 +54,27 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     }),
   ],
   callbacks: {
-    // 1. Guardamos los datos de la BD en el Token
-    async jwt({ token, user }) {
+    ...authConfig.callbacks,
+    async jwt({ token, user }: any) {
+      // 1. Cuando el usuario se loguea, pasamos el rol al Token
       if (user) {
         token.role = user.role;
         token.id = user.id;
         token.branch_name = user.branch_name;
+        console.log("🟢 [PASO 1: JWT] Token guardó el rol:", token.role);
       }
       return token;
     },
-    // 2. Pasamos los datos del Token a la Sesión (Frontend)
-    async session({ session, token }) {
-      if (session.user) {
-        session.user.role = token.role as string;
-        session.user.id = token.id as string;
-        session.user.branch_name = token.branch_name as string;
+    async session({ session, token }: any) {
+      // 2. Pasamos el rol del Token a la Sesión (para que tu recuadro negro lo lea)
+      if (session.user && token) {
+        // @ts-ignore
+        session.user.role = token.role;
+        // @ts-ignore
+        session.user.id = token.id;
+        // @ts-ignore
+        session.user.branch_name = token.branch_name;
+        console.log("🔵 [PASO 2: SESIÓN] Sesión enviada al navegador con rol:", session.user.role);
       }
       return session;
     },

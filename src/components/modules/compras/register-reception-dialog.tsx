@@ -20,6 +20,7 @@ interface RegisterReceptionDialogProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     onSuccess?: () => void;
+    invoices: any[]; // <--- AGREGA ESTO
 }
 
 export function RegisterReceptionDialog({ requestId, open, onOpenChange, onSuccess }: RegisterReceptionDialogProps) {
