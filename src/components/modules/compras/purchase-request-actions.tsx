@@ -29,7 +29,8 @@ export function PurchaseRequestActions({ request, userRole }: Props) {
   // Nuevo estado para el modal de rechazo
   const [showRejectModal, setShowRejectModal] = useState(false);
 
-  const canApprove = ['ADMIN_SUC', 'LOGISTICA', 'CEO'].includes(userRole);
+  // ✅ Cámbialo por esto:
+const canApprove = ['GERENTE GENERAL', 'GERENTE DE LOGISTICA', 'ADMIN_SUCURSAL'].includes(userRole);
   const canEdit = request.status_code === 'PENDIENTE';
 
   return (

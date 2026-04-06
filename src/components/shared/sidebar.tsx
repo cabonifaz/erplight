@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from "react"; // 1. Importamos useState
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -13,27 +13,43 @@ import {
   FileText,
   Truck,
   ClipboardList,
-  Search // 2. Importamos el icono de búsqueda
+  Search,
+  Building, // <-- Icono para Sucursales
+  UserCog   // <-- Icono para Usuarios
 } from "lucide-react";
 
-// Tu lista de opciones (sin cambios)
+// Tu lista base de opciones (la que ven todos)
+// Tu lista base de opciones (la que ven todos)
 export const menuItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/ventas/ordenes", label: "Ventas & OC", icon: ShoppingCart },
   { href: "/compras/solicitudes", label: "Solicitudes Compra", icon: ClipboardList },
   { href: "/compras/registro", label: "Ingresar Facturas", icon: Truck },
-  { href: "/inventario/", label: "Inventario", icon: Package },
+  { href: "/inventario", label: "Inventario", icon: Package },
   { href: "/clientes", label: "Clientes / Proveedores", icon: Users },
   { href: "/reportes", label: "Reportes", icon: FileText },
-  { href: "/configuracion/empresa", label: "Configuración", icon: Settings },
+  // ✂️ Ya no está Configuración aquí
 ];
 
-export function Sidebar() {
+// 1. Recibimos el "user" como propiedad
+export function Sidebar({ user }: { user?: any }) {
   const pathname = usePathname();
-  const [searchTerm, setSearchTerm] = useState(""); // 3. Estado del buscador
+  const [searchTerm, setSearchTerm] = useState("");
 
-  // 4. Lógica de filtrado
-  const filteredItems = menuItems.filter((item) =>
+  // 2. Definimos los items exclusivos para el GERENTE GENERAL
+ // 2. Definimos los items exclusivos para el GERENTE GENERAL
+  const adminItems = [
+    { href: "/sucursales", label: "Sucursales", icon: Building },
+    { href: "/usuarios", label: "Usuarios", icon: UserCog },
+    { href: "/configuracion", label: "Configuración", icon: Settings }, // <-- 🔥 Lo movemos aquí
+  ];
+  // 3. Unimos los menús si el usuario es Gerente General
+  const displayItems = user?.role === 'GERENTE GENERAL' 
+    ? [...menuItems, ...adminItems] 
+    : menuItems;
+
+  // 4. Filtramos sobre la lista combinada para que el buscador funcione con los nuevos botones
+  const filteredItems = displayItems.filter((item) =>
     item.label.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
@@ -45,7 +61,7 @@ export function Sidebar() {
         <span className="text-xl font-bold text-blue-700">GTERP Light</span>
       </div>
       
-      {/* 5. NUEVO: CAMPO DE BÚSQUEDA */}
+      {/* CAMPO DE BÚSQUEDA */}
       <div className="p-3 pb-0">
         <div className="relative">
           <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
@@ -62,14 +78,12 @@ export function Sidebar() {
       {/* NAVEGACIÓN */}
       <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1">
         {filteredItems.length === 0 ? (
-           // Mensaje si no hay resultados
            <div className="px-3 py-4 text-center">
              <p className="text-sm text-gray-400">No se encontraron opciones</p>
            </div>
         ) : (
           filteredItems.map((item) => {
             const Icon = item.icon;
-            // Usamos startsWith para mantener activo si estás en una sub-ruta interna
             const isActive = pathname.startsWith(item.href);
 
             return (
@@ -91,15 +105,20 @@ export function Sidebar() {
         )}
       </nav>
 
-      {/* FOOTER USUARIO */}
+      {/* FOOTER USUARIO (Ahora muestra los datos reales) */}
       <div className="p-4 border-t border-gray-200">
         <div className="flex items-center gap-3">
             <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-bold text-xs">
-                AD
+                {/* Mostramos la primera letra del nombre o 'AD' por defecto */}
+                {user?.name ? user.name.substring(0, 2).toUpperCase() : 'AD'}
             </div>
-            <div className="text-xs">
-                <p className="font-medium text-gray-900">Usuario Conectado</p>
-                <p className="text-gray-500 text-[10px]">Sistema ERP</p>
+            <div className="text-xs overflow-hidden">
+                <p className="font-medium text-gray-900 truncate">
+                  {user?.name || 'Usuario Conectado'}
+                </p>
+                <p className="text-gray-500 text-[10px] truncate">
+                  {user?.role || 'Sistema ERP'}
+                </p>
             </div>
         </div>
       </div>

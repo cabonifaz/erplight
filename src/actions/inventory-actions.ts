@@ -99,6 +99,7 @@ export async function registerManualAdjustment(formData: FormData) {
 }
 
 // --- OBTENER INVENTARIO PRINCIPAL CON FILTROS ---
+// --- OBTENER INVENTARIO PRINCIPAL CON FILTROS (VERSION SEGURA) ---
 export async function getInventoryStocks(filters: {
     branch_id?: number | null;
     search?: string | null;
@@ -106,11 +107,34 @@ export async function getInventoryStocks(filters: {
     max_stock?: number | null;
     updated_from?: string | null;
 } = {}) {
+    const session = await auth(); // 1. Obtenemos la sesión
+    if (!session?.user?.id) return [];
+
     try {
+        const role = session.user.role?.toUpperCase() || "";
+        // @ts-ignore
+        const sessionBranchId = session.user.branch_id; 
+
+        // 2. Lógica de Blindaje:
+        let targetBranchId = filters.branch_id || null;
+
+        // 🛡️ RESTRICCIÓN: Solo el GERENTE GENERAL y ADMINISTRADOR GENERAL pueden saltarse el filtro
+        // Quitamos a 'GERENTE DE LOGISTICA' de aquí
+        const PRIVILEGED_ROLES = ['GERENTE GENERAL', 'ADMINISTRADOR GENERAL'];
+        
+        if (!PRIVILEGED_ROLES.includes(role)) {
+            // Si el rol NO está en la lista de arriba (como María o Lucas)...
+            // Usamos el branch_id de la sesión obligatoriamente
+            if (!sessionBranchId) return []; 
+            
+            // 🔒 SOBRESCRIBIMOS: No importa qué elija en el filtro, mandamos su ID de sesión
+            targetBranchId = sessionBranchId; 
+        }
+        // 3. Ejecutamos el SP con el ID de sucursal ya validado
         const [rows]: any = await pool.query(
             "CALL sp_filtrar_inventario(?, ?, ?, ?, ?)",
             [
-                filters.branch_id || null,
+                targetBranchId, // <--- Aquí ya va el ID blindado
                 filters.search || null,
                 filters.min_stock !== undefined && filters.min_stock !== null && String(filters.min_stock).trim() !== "" ? Number(filters.min_stock) : null,
                 filters.max_stock !== undefined && filters.max_stock !== null && String(filters.max_stock).trim() !== "" ? Number(filters.max_stock) : null,

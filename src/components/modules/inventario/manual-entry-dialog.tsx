@@ -23,9 +23,10 @@ interface ManualEntryDialogProps {
 export function ManualEntryDialog({ open, onOpenChange, branches, userRole, userBranchId }: ManualEntryDialogProps) {
     const [loading, setLoading] = useState(false);
     
-    // 1. Definir roles privilegiados (pueden cambiar de sucursal)
-    const PRIVILEGED_ROLES = ['CEO', 'LOGISTICA', 'ADMINISTRADOR GENERAL'];
-    const canChangeBranch = PRIVILEGED_ROLES.includes(userRole);
+   // 1. Definir roles privilegiados (pueden cambiar de sucursal)
+// Añadimos 'GERENTE GENERAL' a la lista
+const PRIVILEGED_ROLES = ['CEO', 'LOGISTICA', 'ADMINISTRADOR GENERAL', 'GERENTE GENERAL'];
+const canChangeBranch = PRIVILEGED_ROLES.includes(userRole);
 
     // 2. Estados del Formulario
     const [branchId, setBranchId] = useState("");
@@ -144,9 +145,9 @@ export function ManualEntryDialog({ open, onOpenChange, branches, userRole, user
                                     onValueChange={setBranchId} 
                                     disabled={!canChangeBranch} // Bloqueado si no es jefe
                                 >
-                                    <SelectTrigger className={!canChangeBranch ? "bg-gray-100 text-gray-600 font-medium opacity-100" : ""}>
-                                        <SelectValue placeholder={!canChangeBranch && !branchId ? "Sin Asignar" : "Seleccionar"} />
-                                    </SelectTrigger>
+                                    <SelectTrigger className={!canChangeBranch ? "bg-gray-100 text-gray-600 font-medium opacity-100" : "bg-white"}>
+    <SelectValue placeholder={canChangeBranch ? "Seleccionar Sucursal" : "Cargando..."} />
+</SelectTrigger>
                                     <SelectContent>
                                         {branches.map(b => (
                                             <SelectItem key={b.id} value={b.id.toString()}>{b.name}</SelectItem>

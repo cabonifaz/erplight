@@ -7,14 +7,21 @@ interface PurchaseFiltersProps {
     onFilterChange: (filters: any) => void;
     branches?: { id: number, name: string }[];
     availableRequests?: any[];
+    // 🔥 1. Agregamos el rol para saber si lo ocultamos o no
+    userRole?: string; 
 }
 
-export function PurchaseRequestFilters({ onFilterChange, branches = [], availableRequests = [] }: PurchaseFiltersProps) {
+export function PurchaseRequestFilters({ onFilterChange, branches = [], availableRequests = [], userRole = "" }: PurchaseFiltersProps) {
+    
+    // 🔥 2. Validamos si es un usuario restringido
+    const PRIVILEGED_ROLES = ['CEO', 'LOGISTICA', 'ADMINISTRADOR GENERAL', 'GERENTE GENERAL'];
+    const isRestricted = !PRIVILEGED_ROLES.includes(userRole.toUpperCase());
+
     const defaultFilters = {
         branch_id: "",
         code: "",
         description: "",
-        status_id: "", // 🔥 Nuevo campo
+        status_id: "", 
         start_date: "",
         end_date: ""
     };
@@ -34,9 +41,8 @@ export function PurchaseRequestFilters({ onFilterChange, branches = [], availabl
     const uniqueDescriptions = Array.from(new Set(availableRequests.map(r => r.description).filter(Boolean)));
     const uniqueCodes = Array.from(new Set(availableRequests.map(r => `REQ-${r.id.toString().padStart(6, '0')}`)));
 
-    // 🔥 Lista de estados (puedes traerlos de la DB, pero aquí los pongo fijos para rapidez)
-    // Los IDs deben coincidir con los de tu tabla master_catalogs
-  const statuses = [
+    // Lista de estados
+    const statuses = [
         { id: 1, name: "PENDIENTE" },
         { id: 2, name: "APROBADO" },
         { id: 3, name: "RECHAZADO" },
@@ -54,23 +60,26 @@ export function PurchaseRequestFilters({ onFilterChange, branches = [], availabl
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
-                {/* Sucursal */}
-                <div className="md:col-span-2 space-y-1">
-                    <label className="text-xs font-medium text-gray-500">Sucursal</label>
-                    <select 
-                        className="w-full h-10 px-3 rounded-md border border-gray-200 bg-gray-50 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
-                        value={filters.branch_id} 
-                        onChange={(e) => setFilters({...filters, branch_id: e.target.value})}
-                    >
-                        <option value="">Todas</option>
-                        {branches.map(b => (
-                            <option key={b.id} value={b.id}>{b.name}</option>
-                        ))}
-                    </select>
-                </div>
+                
+                {/* 🔥 3. CONDICIÓN: Solo se muestra si NO es un usuario restringido */}
+                {!isRestricted && (
+                    <div className="md:col-span-2 space-y-1">
+                        <label className="text-xs font-medium text-gray-500">Sucursal</label>
+                        <select 
+                            className="w-full h-10 px-3 rounded-md border border-gray-200 bg-gray-50 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            value={filters.branch_id} 
+                            onChange={(e) => setFilters({...filters, branch_id: e.target.value})}
+                        >
+                            <option value="">Todas</option>
+                            {branches.map(b => (
+                                <option key={b.id} value={b.id}>{b.name}</option>
+                            ))}
+                        </select>
+                    </div>
+                )}
 
-                {/* Código */}
-                <div className="md:col-span-2 space-y-1">
+                {/* Código (Le damos un poco más de espacio visual si el selector de sucursal desaparece) */}
+                <div className={isRestricted ? "md:col-span-3 space-y-1" : "md:col-span-2 space-y-1"}>
                     <label className="text-xs font-medium text-gray-500">Código</label>
                     <input 
                         type="text" 
@@ -86,7 +95,7 @@ export function PurchaseRequestFilters({ onFilterChange, branches = [], availabl
                 </div>
 
                 {/* Descripción */}
-                <div className="md:col-span-2 space-y-1">
+                <div className={isRestricted ? "md:col-span-3 space-y-1" : "md:col-span-2 space-y-1"}>
                     <label className="text-xs font-medium text-gray-500">Descripción</label>
                     <input 
                         type="text" 
@@ -101,8 +110,8 @@ export function PurchaseRequestFilters({ onFilterChange, branches = [], availabl
                     </datalist>
                 </div>
 
-                {/* 🔥 NUEVO: Filtro de Estado */}
-                <div className="md:col-span-2 space-y-1">
+                {/* Filtro de Estado */}
+                <div className={isRestricted ? "md:col-span-2 space-y-1" : "md:col-span-2 space-y-1"}>
                     <label className="text-xs font-medium text-gray-500">Estado</label>
                     <select 
                         className="w-full h-10 px-3 rounded-md border border-gray-200 bg-gray-50 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"

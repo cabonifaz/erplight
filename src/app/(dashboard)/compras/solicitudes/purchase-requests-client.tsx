@@ -83,6 +83,7 @@ export default function PurchaseRequestsClient({
     onFilterChange={loadData} 
     branches={branches} 
     availableRequests={initialRequests} 
+    userRole={userRole} // <--- Solo necesitamos el rol
 />
 
         <Card className="shadow-sm border-gray-200 overflow-hidden">

@@ -77,7 +77,7 @@ export async function getPurchaseRequests(filters: {
     branch_id?: string | number;
     code?: string;
     description?: string;
-    status_id?: string | number; // <-- Aquí está
+    status_id?: string | number;
     start_date?: string;
     end_date?: string;
 } = {}) {
@@ -85,14 +85,36 @@ export async function getPurchaseRequests(filters: {
     if (!session?.user?.id) return [];
     
     try {
+        let targetBranchId = filters.branch_id ? Number(filters.branch_id) : null;
+        const role = session.user.role?.toUpperCase() || '';
+
+       // 🛡️ LÓGICA DE SEGURIDAD ESTRICTA POR SUCURSAL 🛡️
+        // Solo el GERENTE GENERAL se salva de este filtro
+        if (role !== 'GERENTE GENERAL') {
+            
+            // Vamos a la BD a buscar la sucursal principal de este usuario
+            const [userBranch]: any = await pool.query(
+                "SELECT branch_id FROM user_branches WHERE user_id = ? AND is_main = 1 LIMIT 1",
+                [session.user.id]
+            );
+
+            if (userBranch.length > 0) {
+                // 🔒 Forzamos a que solo vea su sucursal asignada
+                targetBranchId = userBranch[0].branch_id; 
+            } else {
+                // Si por error el usuario no tiene sucursal en la BD, lo bloqueamos
+                return []; 
+            }
+        }
+
         const [rows]: any = await pool.query(
             "CALL sp_listar_solicitudes(?, ?, ?, ?, ?, ?, ?)", 
             [
                 session.user.id,
-                filters.branch_id ? Number(filters.branch_id) : null,
+                targetBranchId, // <-- Ahora pasamos el ID 100% seguro
                 filters.code || null,
                 filters.description || null,
-                filters.status_id ? Number(filters.status_id) : null, // <-- Y aquí se envía a MySQL
+                filters.status_id ? Number(filters.status_id) : null,
                 filters.start_date || null,
                 filters.end_date || null
             ]
@@ -245,6 +267,40 @@ export async function approveRequestWithDetails(requestId: number, comment: stri
     
     try {
         await connection.beginTransaction();
+        
+        // =========================================================================
+        // 🛡️ LÓGICA DE LÍMITES DE APROBACIÓN POR TRABAJADOR
+        // =========================================================================
+        const role = session.user.role?.toUpperCase() || "";
+
+        // Como GERENTE GENERAL tienes pase libre, los demás pasan por revisión
+        if (role !== 'GERENTE GENERAL') {
+            
+            // 1. Obtenemos cuánto cuesta esta solicitud
+            const [reqInfo]: any = await connection.query(
+                "SELECT estimated_total FROM purchase_requests WHERE id = ?", [requestId]
+            );
+            const montoTotal = parseFloat(reqInfo[0]?.estimated_total || 0);
+
+            // 2. Buscamos el límite de este usuario específico (Usamos 'category' y 'num_1')
+            const [limitData]: any = await connection.query(
+                "SELECT num_1 FROM master_catalogs WHERE category = 'LIMITE_APROBACION' AND code = ? AND status = 1",
+                [session.user.id.toString()]
+            );
+
+            // Si no tiene registro, su límite es 0
+            const limitePermitido = parseFloat(limitData[0]?.num_1 || 0);
+
+            // 3. Verificamos si se pasa de la raya
+            if (montoTotal > limitePermitido) {
+                await connection.rollback();
+                return { 
+                    success: false, 
+                    message: `⛔ Permiso denegado. Tu límite es S/ ${limitePermitido}, pero la solicitud es de S/ ${montoTotal}. Requiere aprobación superior.` 
+                };
+            }
+        }
+        // =========================================================================
         
         // 1. Llamamos a tu procedimiento original para cambiar el estado
         await connection.query("CALL sp_aprobar_solicitud(?, ?, @success, @msg)", [requestId, session.user.id]);

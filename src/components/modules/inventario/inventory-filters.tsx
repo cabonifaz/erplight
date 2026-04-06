@@ -24,8 +24,9 @@ export function InventoryFilters({ branches, products, userBranchId, userRole }:
     const { replace } = useRouter();
 
     // Lógica de Permisos
-    const PRIVILEGED_ROLES = ['CEO', 'LOGISTICA', 'ADMINISTRADOR GENERAL'];
-    const isRestricted = !PRIVILEGED_ROLES.includes(userRole);
+   // Lógica de Permisos - Agregamos GERENTE GENERAL
+const PRIVILEGED_ROLES = ['CEO', 'LOGISTICA', 'ADMINISTRADOR GENERAL', 'GERENTE GENERAL'];
+const isRestricted = !PRIVILEGED_ROLES.includes(userRole);
 
     // --- ESTADOS LOCALES (No afectan la URL todavía) ---
     // Inicializamos con lo que venga en la URL o vacío
@@ -61,26 +62,23 @@ export function InventoryFilters({ branches, products, userBranchId, userRole }:
 
     // --- ACCIÓN: LIMPIAR TODO ---
     const clearFilters = () => {
-        // 1. Reseteamos estados visuales
-        setQuery("");
-        setMinStock("");
-        setMaxStock("");
-        setDateFrom("");
-        
-        // Si es restringido, no le quitamos su sucursal
-        if (!isRestricted) {
-            setBranchId("");
-        } else if (userBranchId) {
-            setBranchId(userBranchId.toString());
-        }
-
-        // 2. Reseteamos URL
+    setQuery("");
+    setMinStock("");
+    setMaxStock("");
+    setDateFrom("");
+    
+    if (!isRestricted) {
+        // Si eres gerente, al limpiar ves TODO
+        setBranchId("ALL"); 
+        replace(pathname);
+    } else {
+        // Si eres restringido, te mantiene en tu sucursal
+        setBranchId(userBranchId.toString());
         const params = new URLSearchParams();
-        if (isRestricted && userBranchId) {
-            params.set("branchId", userBranchId.toString());
-        }
+        params.set("branchId", userBranchId.toString());
         replace(`${pathname}?${params.toString()}`);
-    };
+    }
+};
 
     return (
         <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm space-y-4">
@@ -92,27 +90,37 @@ export function InventoryFilters({ branches, products, userBranchId, userRole }:
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
                 
                 {/* 1. SUCURSAL */}
-                <div className="space-y-1">
-                    <Label className="text-xs text-gray-500">Sucursal</Label>
-                    <div className="relative">
-                        <Select 
-                            value={branchId}
-                            onValueChange={setBranchId}
-                            disabled={isRestricted} 
-                        >
-                            <SelectTrigger className={cn("h-8 text-xs bg-gray-50", isRestricted && "opacity-80 bg-gray-100")}>
-                                <SelectValue placeholder="Todas" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="ALL">Todas las sedes</SelectItem>
-                                {branches.map(b => (
-                                    <SelectItem key={b.id} value={b.id.toString()}>{b.name}</SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-                        {isRestricted && <Lock className="w-3 h-3 text-gray-400 absolute right-8 top-2.5" />}
-                    </div>
-                </div>
+                {/* 1. SUCURSAL */}
+<div className="space-y-1">
+    <Label className="text-xs text-gray-500">Sucursal</Label>
+    <div className="relative">
+        <Select 
+            value={branchId}
+            onValueChange={setBranchId}
+            // 🔓 Se desbloquea si eres Gerente
+            disabled={isRestricted} 
+        >
+            <SelectTrigger className={cn(
+                "h-8 text-xs bg-gray-50", 
+                isRestricted && "opacity-80 bg-gray-100 cursor-not-allowed"
+            )}>
+                <SelectValue placeholder="Seleccionar sucursal" />
+            </SelectTrigger>
+            <SelectContent>
+                {/* 🌍 Solo el Gerente ve la opción de "Todas las sedes" */}
+                {!isRestricted && (
+                    <SelectItem value="ALL">Todas las sedes</SelectItem>
+                )}
+                
+                {branches.map(b => (
+                    <SelectItem key={b.id} value={b.id.toString()}>{b.name}</SelectItem>
+                ))}
+            </SelectContent>
+        </Select>
+        {/* 🔒 El candado solo aparece si está restringido */}
+        {isRestricted && <Lock className="w-3 h-3 text-gray-400 absolute right-8 top-2.5" />}
+    </div>
+</div>
 
                 {/* 2. PRODUCTO (COMBOBOX) */}
                 <div className="space-y-1 lg:col-span-1">
