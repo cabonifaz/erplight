@@ -13,9 +13,9 @@ interface PurchaseFiltersProps {
 
 export function PurchaseRequestFilters({ onFilterChange, branches = [], availableRequests = [], userRole = "" }: PurchaseFiltersProps) {
     
-    // 🔥 2. Validamos si es un usuario restringido
-    const PRIVILEGED_ROLES = ['CEO', 'LOGISTICA', 'ADMINISTRADOR GENERAL', 'GERENTE GENERAL'];
-    const isRestricted = !PRIVILEGED_ROLES.includes(userRole.toUpperCase());
+   // 🔓 Agregamos 'GERENTE DE LOGISTICA' para que no sea restringido
+const PRIVILEGED_ROLES = ['GERENTE GENERAL', 'GERENTE DE LOGISTICA', 'ADMINISTRADOR GENERAL'];
+const isRestricted = !PRIVILEGED_ROLES.includes(userRole.toUpperCase());
 
     const defaultFilters = {
         branch_id: "",

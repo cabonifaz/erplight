@@ -23,10 +23,9 @@ export function InventoryFilters({ branches, products, userBranchId, userRole }:
     const pathname = usePathname();
     const { replace } = useRouter();
 
-    // Lógica de Permisos
-   // Lógica de Permisos - Agregamos GERENTE GENERAL
-const PRIVILEGED_ROLES = ['CEO', 'LOGISTICA', 'ADMINISTRADOR GENERAL', 'GERENTE GENERAL'];
-const isRestricted = !PRIVILEGED_ROLES.includes(userRole);
+    /// Lógica de Permisos - Agregamos GERENTE DE LOGISTICA al grupo VIP
+    const PRIVILEGED_ROLES = ['GERENTE GENERAL', 'GERENTE DE LOGISTICA', 'ADMINISTRADOR GENERAL'];
+    const isRestricted = !PRIVILEGED_ROLES.includes(userRole?.toUpperCase() || "");
 
     // --- ESTADOS LOCALES (No afectan la URL todavía) ---
     // Inicializamos con lo que venga en la URL o vacío

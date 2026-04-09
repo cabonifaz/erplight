@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { createUser } from "@/actions/admin-actions";
-import { toast } from "sonner"; // Asumiendo que usas Sonner para las notificaciones
+import { toast } from "sonner"; 
 
 export default function UsuariosClient({ users, branches }: { users: any[], branches: any[] }) {
     const [role, setRole] = useState("ADMIN_SUCURSAL");
@@ -15,18 +15,17 @@ export default function UsuariosClient({ users, branches }: { users: any[], bran
         );
     };
 
-    const isGerente = role === "GERENTE GENERAL" ;
+    const isGerente = role === "GERENTE GENERAL" || role === "GERENTE DE LOGISTICA";
 
     // Enlazamos el server action con el array de sucursales seleccionadas
     const submitUser = createUser.bind(null, selectedBranches);
 
     // Atrapamos el envío del formulario para mostrar la contraseña
-    // Atrapamos el envío del formulario para mostrar la contraseña
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         setLoading(true);
         
-        // 💡 1. Guardamos el formulario en una variable ANTES del await
+        // 1. Guardamos el formulario en una variable ANTES del await
         const form = e.currentTarget; 
         const formData = new FormData(form);
         
@@ -38,7 +37,7 @@ export default function UsuariosClient({ users, branches }: { users: any[], bran
             // Mostramos la contraseña generada
             toast.success(result.message, { duration: 10000 });
             
-            // 💡 2. Usamos la variable 'form' que guardamos arriba
+            // 2. Usamos la variable 'form' que guardamos arriba
             form.reset(); 
             setSelectedBranches([]);
             setRole("ADMIN_SUCURSAL");
@@ -76,6 +75,8 @@ export default function UsuariosClient({ users, branches }: { users: any[], bran
                             >
                                 <option value="GERENTE GENERAL">Gerente General</option>
                                 <option value="GERENTE DE LOGISTICA">Gerente de Logística</option>
+                                {/* ✨ AQUÍ ESTÁ EL NUEVO ROL ✨ */}
+                                <option value="ADMINISTRADOR_ZONAL">Administrador Zonal</option>
                                 <option value="ADMIN_SUCURSAL">Administrador de Sucursal</option>
                                 <option value="ALMACENERO">Almacenero</option>
                             </select>
@@ -130,7 +131,7 @@ export default function UsuariosClient({ users, branches }: { users: any[], bran
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{user.email}</td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm">
                                     <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full 
-                                        ${user.role.includes('GERENTE') ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'}`}>
+                                        ${user.role.includes('GERENTE') || user.role.includes('ZONAL') ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'}`}>
                                         {user.role}
                                     </span>
                                 </td>

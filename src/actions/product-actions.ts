@@ -64,13 +64,13 @@ export async function createProduct(formData: FormData) {
 }
 
 // --- LISTAR PRODUCTOS ---
-export async function getProductsList() {
-    try {
-        // Llamada limpia al Stored Procedure
-        const [results]: any = await pool.query("CALL sp_listar_productos()");
-        return results[0] || [];
-    } catch (error) {
-        console.error("Error al listar productos:", error);
-        return [];
-    }
+export async function getProducts() {
+  try {
+    // Usamos el SP que ya vi que tienes en tu base de datos
+    const [rows]: any = await pool.query("CALL sp_listar_productos()");
+    return rows[0] || [];
+  } catch (error) {
+    console.error("Error al listar productos:", error);
+    return [];
+  }
 }

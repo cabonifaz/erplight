@@ -31,10 +31,14 @@ export interface Quotation {
 
 export async function getRequestDetails(requestId: number) {
     try {
-        const [results]: any = await pool.query("CALL sp_obtener_detalle_completo_solicitud(?)", [requestId]);
+        // 🔥 1. Agregamos el (?) que faltaba en la llamada
+        const [results]: any = await pool.query("CALL sp_obtener_detalle_solicitud(?)", [requestId]);
+        
         return { 
-            quotations: results[0] as Quotation[] || [], 
-            request: results[1] ? results[1][0] : null 
+            // Si este SP no trae cotizaciones, lo dejamos como arreglo vacío para no romper el frontend
+            quotations: [], 
+            // 🔥 2. Leemos results[0][0] porque el SP solo tiene un SELECT principal
+            request: results[0] ? results[0][0] : null 
         };
     } catch (error) {
         console.error("Error fetching details:", error);
@@ -90,7 +94,9 @@ export async function getPurchaseRequests(filters: {
 
        // 🛡️ LÓGICA DE SEGURIDAD ESTRICTA POR SUCURSAL 🛡️
         // Solo el GERENTE GENERAL se salva de este filtro
-        if (role !== 'GERENTE GENERAL') {
+        // 🛡️ LÓGICA DE SEGURIDAD ESTRICTA POR SUCURSAL 🛡️
+// Devolvemos el acceso global al rol de logística
+if (role !== 'GERENTE GENERAL' && role !== 'GERENTE DE LOGISTICA') {
             
             // Vamos a la BD a buscar la sucursal principal de este usuario
             const [userBranch]: any = await pool.query(

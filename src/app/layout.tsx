@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
-import "./globals.css";
+import "@/app/globals.css";
 import { cn } from "@/lib/utils";
 // 1. IMPORTAR EL TOASTER DE SONNER
 import { Toaster } from "@/components/ui/sonner"; 

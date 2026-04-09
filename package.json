@@ -39,7 +39,8 @@
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.4.0",
     "tailwindcss-animate": "^1.0.7",
-    "use-debounce": "^10.0.6"
+    "use-debounce": "^10.0.6",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

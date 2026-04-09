@@ -74,8 +74,9 @@ export default function PurchaseRequestsClient({
           </div>
           
           <div className="w-full sm:w-auto">
-              <RequestFormSheet userBranchId={userBranchId} />
-          </div>
+    {/* 💡 AQUÍ LE PASAMOS EL ROL AL FORMULARIO */}
+    <RequestFormSheet userBranchId={userBranchId} userRole={userRole} />
+</div>
         </div>
 
         {/* AQUÍ ESTÁ TU NUEVO BUSCADOR CON AUTOCOMPLETADO */}

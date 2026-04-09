@@ -52,7 +52,7 @@ export async function registerManualAdjustment(formData: FormData) {
     // @ts-ignore
     const sessionBranchId = session.user.branch_id; 
     
-    const PRIVILEGED_ROLES = ['CEO', 'LOGISTICA', 'ADMINISTRADOR GENERAL'];
+    const PRIVILEGED_ROLES = ['GERENTE GENERAL', 'GERENTE DE LOGISTICA', 'ADMINISTRADOR GENERAL'];
     const STORE_ROLES = ['ADMIN_SUC', 'ALMACEN'];
 
     // 1. Validación de Roles
@@ -120,7 +120,8 @@ export async function getInventoryStocks(filters: {
 
         // 🛡️ RESTRICCIÓN: Solo el GERENTE GENERAL y ADMINISTRADOR GENERAL pueden saltarse el filtro
         // Quitamos a 'GERENTE DE LOGISTICA' de aquí
-        const PRIVILEGED_ROLES = ['GERENTE GENERAL', 'ADMINISTRADOR GENERAL'];
+        // Agregamos nuevamente el rol a la lista de privilegiados
+const PRIVILEGED_ROLES = ['GERENTE GENERAL', 'GERENTE DE LOGISTICA', 'ADMINISTRADOR GENERAL'];
         
         if (!PRIVILEGED_ROLES.includes(role)) {
             // Si el rol NO está en la lista de arriba (como María o Lucas)...

@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Plus, ShoppingCart, Banknote, Trash2, Paperclip, Edit, FileText, X } from "lucide-react"; 
+import { Loader2, Plus, ShoppingCart, Edit, FileText, X, Paperclip, Trash2 } from "lucide-react"; 
 import { toast } from "sonner";
 
 const Req = () => <span className="text-red-500 ml-1 font-bold">*</span>;
@@ -17,11 +17,12 @@ interface Branch { id: number; name: string; }
 
 interface RequestFormSheetProps {
   userBranchId?: number; 
+  userRole?: string; // 💡 NUEVO: Recibimos el rol del usuario
   requestToEdit?: any;
   trigger?: React.ReactNode;
 }
 
-export function RequestFormSheet({ userBranchId, requestToEdit, trigger }: RequestFormSheetProps) {
+export function RequestFormSheet({ userBranchId, userRole, requestToEdit, trigger }: RequestFormSheetProps) {
   const [open, setOpen] = useState(false);
   const [branches, setBranches] = useState<Branch[]>([]);
   
@@ -34,6 +35,11 @@ export function RequestFormSheet({ userBranchId, requestToEdit, trigger }: Reque
 
   const isEditing = !!requestToEdit;
   
+  // 🛡️ LÓGICA DE RESTRICCIÓN VISUAL
+  // El Gerente de Logística está en la lista, así que el candado NO se le aplicará
+  const PRIVILEGED_ROLES = ['GERENTE GENERAL', 'GERENTE DE LOGISTICA', 'ADMINISTRADOR GENERAL'];
+  const isRestricted = !PRIVILEGED_ROLES.includes(userRole?.toUpperCase() || "");
+  
   const actionFn = isEditing ? updatePurchaseRequest : createPurchaseRequest;
   const [state, dispatch, isPending] = useActionState(actionFn, null);
 
@@ -44,15 +50,12 @@ export function RequestFormSheet({ userBranchId, requestToEdit, trigger }: Reque
       getBranches().then(data => {
           setBranches(data);
 
-          // LOGICA DE ASIGNACIÓN (Dentro del then para asegurar sincronía)
+          // LOGICA DE ASIGNACIÓN
           if (isEditing && requestToEdit?.branch_id) {
-              // Si editamos, forzamos el ID de la solicitud como string
               setSelectedBranch(String(requestToEdit.branch_id));
           } else if (!isEditing && userBranchId) {
-              // Si creamos, usamos la del usuario
               setSelectedBranch(String(userBranchId));
           } else if (data.length > 0 && !selectedBranch) {
-              // Fallback
               setSelectedBranch(String(data[0].id));
           }
       });
@@ -64,7 +67,7 @@ export function RequestFormSheet({ userBranchId, requestToEdit, trigger }: Reque
           });
       }
     }
-  }, [open, isEditing, requestToEdit, userBranchId]); // Dependencias
+  }, [open, isEditing, requestToEdit, userBranchId]); 
 
   // 2. EFECTO POST-ENVÍO
   useEffect(() => {
@@ -122,20 +125,17 @@ export function RequestFormSheet({ userBranchId, requestToEdit, trigger }: Reque
               <div className="space-y-2">
                 <Label className="text-xs font-semibold text-gray-600">Sucursal <Req/></Label>
                 
+                {/* El campo oculto garantiza que el ID siempre se envíe al servidor */}
                 <input type="hidden" name="branch_id" value={selectedBranch} />
 
                 <Select 
-                    // SOLUCIÓN AQUÍ: Agregamos branches.length a la key.
-                    // Cuando las sucursales terminen de cargar, la key cambia y el componente se "refresca",
-                    // encontrando ahora sí el nombre que corresponde al ID seleccionado.
                     key={`select-${isEditing ? 'edit' : 'create'}-${branches.length}`}
-                    
                     value={selectedBranch} 
                     onValueChange={setSelectedBranch} 
+                    disabled={isRestricted} // 🔒 CANDADO ACTIVADO
                     required
                 >
-                    <SelectTrigger className="h-10 bg-gray-50 border-gray-200">
-                        {/* Placeholder dinámico */}
+                    <SelectTrigger className={`h-10 border-gray-200 ${isRestricted ? 'bg-gray-100 opacity-80 cursor-not-allowed' : 'bg-gray-50'}`}>
                         <SelectValue placeholder={branches.length === 0 ? "Cargando sedes..." : "Seleccione Sede"} />
                     </SelectTrigger>
                     <SelectContent>
