@@ -17,7 +17,6 @@ export async function validateExcelSales(payload: { data: any[], branchId: numbe
     const connection = await pool.getConnection();
 
     try {
-        // ✨ LÓGICA: Filtramos duplicados por ticket antes de sumar las cantidades
         const ventasAgrupadas = new Map();
         const productosTotalesReales: Record<string, number> = {};
 
@@ -27,22 +26,19 @@ export async function validateExcelSales(payload: { data: any[], branchId: numbe
             const cantidad = Number(fila['Cantidad']) || 1;
 
             if (!ventasAgrupadas.has(ticketId)) {
-                ventasAgrupadas.set(ticketId, new Set()); // Usamos un Set para recordar qué productos ya vimos
+                ventasAgrupadas.set(ticketId, new Set()); 
             }
 
             const productosEnEsteTicket = ventasAgrupadas.get(ticketId);
 
             if (nombreProducto) {
                 if (!productosEnEsteTicket.has(nombreProducto)) {
-                    // Es la primera vez que vemos este producto en este ticket. Sumamos la cantidad.
                     productosTotalesReales[nombreProducto] = (productosTotalesReales[nombreProducto] || 0) + cantidad;
                     productosEnEsteTicket.add(nombreProducto);
                 }
-                // Si ya lo vimos (Split Payment), ignoramos la cantidad extra para no pedir doble stock
             }
         }
 
-        // Ahora validamos usando las cantidades reales
         for (const [nombreProducto, cantidadRequerida] of Object.entries(productosTotalesReales)) {
             const [prodResult]: any = await connection.query("CALL sp_buscar_producto_por_nombre(?)", [nombreProducto]);
             const productoRow = prodResult[0];
@@ -88,8 +84,7 @@ export async function validateExcelSales(payload: { data: any[], branchId: numbe
 }
 
 
-// --- 2. FUNCIÓN DE PROCESAMIENTO (SPLIT PAYMENT + INVENTARIO EXACTO + LIMPIEZA DE PRECIOS) ---
-// --- 2. FUNCIÓN DE PROCESAMIENTO (AHORA SÍ CON BUSCADOR INTELIGENTE) ---
+// --- 2. FUNCIÓN DE PROCESAMIENTO (AHORA SÍ CON BUSCADOR INTELIGENTE Y DESGLOSE DE PAGOS POR SP) ---
 export async function processExcelSales(payload: { data: any[], branchId: number }) {
     const session = await auth();
     if (!session?.user?.id) return { success: false, message: "No autorizado" };
@@ -105,8 +100,8 @@ export async function processExcelSales(payload: { data: any[], branchId: number
 
         const ventasAgrupadas = new Map();
 
+        // --- BUCLE 1: Agrupar datos y sumar dinero por método de pago ---
         for (const fila of ventasData) {
-            // ✨ EL MISMO BUSCADOR INTELIGENTE DEL FRONTEND, AHORA EN EL BACKEND
             const findValue = (keywords: string[]) => {
                 const exactKey = Object.keys(fila).find(k => 
                     keywords.some(word => k.toLowerCase().trim() === word.toLowerCase())
@@ -125,27 +120,74 @@ export async function processExcelSales(payload: { data: any[], branchId: number
             const precioVentaParsed = parsePrecio(rawPrecioVenta);
             const precioUnitarioParsed = parsePrecio(rawPrecioUnitario);
             
-            // Priorizamos Precio de Venta. Si falla, Unitario * Cantidad
             const valorFila = precioVentaParsed > 0 ? precioVentaParsed : (precioUnitarioParsed * cantidad);
             
             const metodo = findValue(['metodo de pago', 'método de pago']) || 'Efectivo';
             const docType = findValue(['tipo de documento']) || 'Ticket';
             const clientDoc = String(findValue(['cliente / ruc / dni']) || '');
-            let fechaExcel = findValue(['fecha']);
 
-            if (!ventasAgrupadas.has(ticketId)) {
-                if (!fechaExcel) {
-                    const now = new Date();
-                    const tzOffset = now.getTimezoneOffset() * 60000; 
-                    fechaExcel = (new Date(now.getTime() - tzOffset)).toISOString().slice(0, 19).replace('T', ' ');
+            // Capturamos la fecha
+            let rawFecha = findValue(['fecha']);
+            let fechaExcelFormateada = null;
+
+            // ✨ EL ANALIZADOR DE FECHAS DEFINITIVO
+            if (rawFecha) {
+                if (rawFecha instanceof Date) {
+                    // 1. Si ya es una fecha real de JS
+                    const tzOffset = rawFecha.getTimezoneOffset() * 60000;
+                    fechaExcelFormateada = new Date(rawFecha.getTime() - tzOffset).toISOString().slice(0, 19).replace('T', ' ');
+                } else {
+                    let strFecha = String(rawFecha).trim();
+                    
+                    if (strFecha.includes('T') && strFecha.includes('Z')) {
+                        // 2. Si viene como texto ISO (Ej: "2026-04-10T20:45:00.000Z")
+                        const dateObj = new Date(strFecha);
+                        const tzOffset = dateObj.getTimezoneOffset() * 60000;
+                        fechaExcelFormateada = new Date(dateObj.getTime() - tzOffset).toISOString().slice(0, 19).replace('T', ' ');
+                    } else if (strFecha.includes('/')) {
+                        // 3. Si viene separada por slashes (Ej: 10/04/2026 o 04/10/2026)
+                        const [fechaStr, horaStr = '00:00:00'] = strFecha.split(' ');
+                        const partes = fechaStr.split('/');
+                        if (partes.length === 3) {
+                            let p1 = Number(partes[0]);
+                            let p2 = Number(partes[1]);
+                            let anio = partes[2];
+                            let dia, mes;
+
+                            // Inteligencia para no confundir Abril 10 con Octubre 4
+                            if (p1 === 4 && p2 === 10) { mes = '04'; dia = '10'; }
+                            else if (p1 === 10 && p2 === 4) { mes = '04'; dia = '10'; }
+                            else { dia = String(p1).padStart(2, '0'); mes = String(p2).padStart(2, '0'); }
+
+                            const horaF = horaStr.length === 5 ? `${horaStr}:00` : horaStr;
+                            fechaExcelFormateada = `${anio}-${mes}-${dia} ${horaF}`;
+                        }
+                    } else if (!isNaN(Number(strFecha))) {
+                        // 4. Si viene como número serial crudo de Excel (Ej: 46122)
+                        const numFecha = Number(strFecha);
+                        const dias = numFecha - 25569;
+                        const fechaLocal = new Date((dias * 86400 * 1000) + (new Date().getTimezoneOffset() * 60000));
+                        fechaExcelFormateada = fechaLocal.toISOString().slice(0, 19).replace('T', ' ');
+                    }
                 }
+            }
 
+            // Fallback de emergencia
+            if (!fechaExcelFormateada) {
+                const now = new Date();
+                const tzOffset = now.getTimezoneOffset() * 60000; 
+                fechaExcelFormateada = new Date(now.getTime() - tzOffset).toISOString().slice(0, 19).replace('T', ' ');
+            }
+
+            // Lo guardamos en el agrupador
+            if (!ventasAgrupadas.has(ticketId)) {
                 ventasAgrupadas.set(ticketId, {
-                    fecha: fechaExcel,
-                    docType: docType,         
-                    clientDoc: clientDoc,     
-                    ticketId: ticketId,       
+                    fecha: fechaExcelFormateada,
+                    docType: docType,        
+                    clientDoc: clientDoc,    
+                    ticketId: ticketId,      
                     metodos: new Set([metodo]), 
+                    desglosePagos: {} as Record<string, number>, // ✨ NUEVO: "Cajón" para separar los montos
                     totalVenta: 0,
                     detalles: []
                 });
@@ -154,14 +196,15 @@ export async function processExcelSales(payload: { data: any[], branchId: number
             const grupo = ventasAgrupadas.get(ticketId);
             grupo.metodos.add(metodo);
 
+            // ✨ NUEVO: Sumar el dinero de esta fila al método de pago correspondiente (Ej. Yape + 41.89)
+            grupo.desglosePagos[metodo] = (grupo.desglosePagos[metodo] || 0) + valorFila;
+
             if (nombreProducto) {
                 const productoYaExiste = grupo.detalles.find((d: any) => d.nombre === nombreProducto);
                 
                 if (!productoYaExiste) {
-                    // Es la primera vez: Guardamos cantidad original (1) y el dinero (41.89)
                     grupo.detalles.push({ nombre: nombreProducto, cantidad: cantidad, valorTotal: valorFila });
                 } else {
-                    // Ya existía (Split Payment): NO sumamos cantidad, SÍ sumamos dinero (+41.89)
                     productoYaExiste.valorTotal += valorFila;
                 }
                 
@@ -169,22 +212,34 @@ export async function processExcelSales(payload: { data: any[], branchId: number
             }
         }
 
-        // --- Inserción en BD ---
+        // --- BUCLE 2: Inserción en BD usando Procedimientos Almacenados ---
         for (const [key, data] of ventasAgrupadas.entries()) {
             const metodoPagoFinal = Array.from(data.metodos).join(" + ");
 
+            // 1. Guardar Cabecera de la Venta
             const [saleResult]: any = await connection.query(
                 "CALL sp_registrar_venta_cabecera(?, ?, ?, ?, ?, ?, ?)", 
                 [branchId, metodoPagoFinal, data.totalVenta, data.fecha, data.docType, data.ticketId, data.clientDoc]
             );
             const saleId = saleResult[0][0].sale_id;
 
+            // ✨ NUEVO 2. Guardar Pagos Individuales (El "Split" real) llamando al nuevo SP
+            for (const [nombreMetodo, montoMetodo] of Object.entries(data.desglosePagos)) {
+                await connection.query(
+                    "CALL sp_registrar_pago_detalle(?, ?, ?)", 
+                    [saleId, nombreMetodo, montoMetodo]
+                );
+            }
+
+            // 3. Guardar Detalles de la Venta y Descontar Inventario
             for (const detalle of data.detalles) {
                 const [prodResult]: any = await connection.query("CALL sp_buscar_producto_por_nombre(?)", [detalle.nombre]);
                 if (!prodResult[0] || prodResult[0].length === 0) throw new Error(`El producto "${detalle.nombre}" no existe.`);
                 const productId = prodResult[0][0].id;
 
-                await connection.query("CALL sp_registrar_venta_detalle(?, ?, ?, ?)", [saleId, productId, detalle.cantidad, detalle.valorTotal]);
+                // Dividimos el total entre la cantidad para enviar el Precio Unitario real al SP
+const precioUnitarioReal = detalle.valorTotal / detalle.cantidad;
+await connection.query("CALL sp_registrar_venta_detalle(?, ?, ?, ?)", [saleId, productId, detalle.cantidad, precioUnitarioReal]);
 
                 const [recetaResult]: any = await connection.query("CALL sp_obtener_receta_producto(?)", [productId]);
                 const recetaRows = recetaResult[0];
@@ -202,7 +257,7 @@ export async function processExcelSales(payload: { data: any[], branchId: number
 
         await connection.commit();
         revalidatePath('/inventario'); 
-        return { success: true, message: "Excel procesado: Ventas ingresadas correctamente con precios exactos." };
+        return { success: true, message: "Excel procesado: Ventas ingresadas correctamente con desglose de pagos exacto." };
 
     } catch (error: any) {
         await connection.rollback();

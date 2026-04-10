@@ -18,7 +18,9 @@ import {
   UserCog,
   ChevronDown, 
   Upload,      
-  History      
+  History,
+  TrendingUp, // <- NUEVO
+  BarChart // <- NUEVO
 } from "lucide-react";
 
 // --- NUEVO: Le decimos a TypeScript cómo es un ítem del menú ---
@@ -54,7 +56,15 @@ export const menuItems: MenuItem[] = [
     ]
   },
   { href: "/clientes", label: "Clientes / Proveedores", icon: Users },
-  { href: "/reportes", label: "Reportes", icon: FileText },
+  { 
+    label: "Reportes", 
+    icon: BarChart, 
+    isDropdown: true, 
+    subItems: [
+      { href: "/reportes/cierre", label: "Cierres Diarios", icon: FileText },
+      { href: "/reportes/proyecciones", label: "Proyección Ventas", icon: TrendingUp }
+    ]
+  },
 ];
 
 export function Sidebar({ user }: { user?: any }) {
