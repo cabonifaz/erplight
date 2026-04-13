@@ -41,18 +41,37 @@ export default function SalesUploadClient({ sucursales }: { sucursales: any[] })
 
   const handleValidar = async () => {
     if (fileData.length === 0) return;
-    
-    // 3. Bloqueamos la validación si no ha elegido sucursal
     if (!selectedBranch) {
         alert("Por favor, selecciona una sucursal antes de validar.");
         return;
     }
     
     setIsProcessing(true);
-    const plainData = JSON.parse(JSON.stringify(fileData));
+
+    // ✨ NORMALIZACIÓN: Convertimos los nombres de los productos del Excel a MAYÚSCULAS
+    // para que coincidan con la base de datos que actualizamos con UPPER()
+    const cleanedData = fileData.map((row: any) => {
+        // Buscamos la columna del producto (independientemente de cómo se escriba el encabezado)
+        const productKey = Object.keys(row).find(k => 
+            ['producto / descripción', 'producto', 'descripcion', 'producto / descripcion'].some(word => 
+                k.toLowerCase().trim() === word.toLowerCase()
+            )
+        );
+
+        if (productKey) {
+            return {
+                ...row,
+                [productKey]: String(row[productKey]).toUpperCase().trim()
+            };
+        }
+        return row;
+    });
     
-    // 4. Enviamos la data y la sucursal al backend
-    const response = await validateExcelSales({ data: plainData, branchId: Number(selectedBranch) });
+    // Enviamos la data ya normalizada (en MAYÚSCULAS)
+    const response = await validateExcelSales({ 
+        data: cleanedData, 
+        branchId: Number(selectedBranch) 
+    });
     
     if (response.success) {
         setValidationIssues((response as any).issues);
@@ -64,7 +83,7 @@ export default function SalesUploadClient({ sucursales }: { sucursales: any[] })
     setIsProcessing(false);
   };
 
-  const handleIngresar = async () => {
+ const handleIngresar = async () => {
     if (fileData.length === 0 || !canSubmit) return;
     
     // Validación de seguridad por si acaso
@@ -74,10 +93,26 @@ export default function SalesUploadClient({ sucursales }: { sucursales: any[] })
     }
     
     setIsProcessing(true);
-    const plainData = JSON.parse(JSON.stringify(fileData));
     
-    // 5. Enviamos al backend para procesar con la sucursal elegida
-    const response = await processExcelSales({ data: plainData, branchId: Number(selectedBranch) });
+    // ✨ APLICAMOS LA MISMA LIMPIEZA ESTRICTA QUE EN LA VALIDACIÓN
+    const cleanedData = fileData.map((row: any) => {
+        const productKey = Object.keys(row).find(k => 
+            ['producto / descripción', 'producto', 'descripcion', 'producto / descripcion'].some(word => 
+                k.toLowerCase().trim() === word.toLowerCase()
+            )
+        );
+
+        if (productKey) {
+            return {
+                ...row,
+                [productKey]: String(row[productKey]).toUpperCase().trim()
+            };
+        }
+        return row;
+    });
+    
+    // Enviamos al backend la data LIMPIA (cleanedData) en lugar del crudo
+    const response = await processExcelSales({ data: cleanedData, branchId: Number(selectedBranch) });
     
     if (response.success) {
         alert("¡Éxito! " + response.message);
@@ -85,6 +120,7 @@ export default function SalesUploadClient({ sucursales }: { sucursales: any[] })
         setFileName(null);
         setIsValidated(false);
         setValidationIssues([]);
+        setCanSubmit(false); // Reseteamos también el botón
     } else {
         alert("Error: " + response.message);
     }

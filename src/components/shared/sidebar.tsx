@@ -20,7 +20,10 @@ import {
   Upload,      
   History,
   TrendingUp, // <- NUEVO
-  BarChart // <- NUEVO
+  BarChart, // <- NUEVO
+  Globe, // ✨ NUEVO: Agregamos el ícono del mundo
+  CalendarDays,
+  Building2
 } from "lucide-react";
 
 // --- NUEVO: Le decimos a TypeScript cómo es un ítem del menú ---
@@ -61,8 +64,14 @@ export const menuItems: MenuItem[] = [
     icon: BarChart, 
     isDropdown: true, 
     subItems: [
+      // 1. RESULTADOS (El Pasado)
+      { href: "/reportes/dashboard-corporativo", label: "Dashboard Corporativo", icon: Building2 }, // ✨ NUEVO REPORTE GENERAL
       { href: "/reportes/cierre", label: "Cierres Diarios", icon: FileText },
-      { href: "/reportes/proyecciones", label: "Proyección Ventas", icon: TrendingUp }
+      { href: "/reportes/cierre-mensual", label: "Cierre Mensual", icon: CalendarDays },
+      
+      // 2. ESTIMACIONES (El Futuro)
+      { href: "/reportes/proyecciones", label: "Proyección Ventas", icon: TrendingUp },
+      { href: "/reportes/proyecciones-global", label: "Proyección Global", icon: Globe }
     ]
   },
 ];

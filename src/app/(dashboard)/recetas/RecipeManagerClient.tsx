@@ -189,7 +189,7 @@ export default function RecipeManagerClient({ productos }: RecipeManagerProps) {
 
               <div className="mb-6">
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Cantidad (Ej. 1, 0.150 para gramos, etc):
+                  Cantidad (Ej. 150 para gramos, 1 para unidades):
                 </label>
                 <input 
                   type="number" 
