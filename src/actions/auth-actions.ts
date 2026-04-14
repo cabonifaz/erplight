@@ -2,19 +2,43 @@
 
 import { signIn } from "@/auth";
 import { AuthError } from "next-auth";
+import { pool } from "@/lib/db"; // ✨ Importamos la conexión a tu base de datos
 
 export async function authenticate(prevState: string | undefined, formData: FormData) {
   try {
-    // 1. CAPTURAR EL VALOR (Opcional: Para lógica futura o logs)
-    // El checkbox envía 'on' si está marcado, o null si no lo está.
     const remember = formData.get('remember') === 'on';
+    
+    // Asumimos que el input de tu formulario se llama 'email'. 
+    // Si se llama diferente, cámbialo aquí.
+    const email = formData.get('email') as string; 
+    
+    let rutaDestino = '/dashboard'; // Ruta por defecto para Gerentes, Admins, etc.
 
-    // Nota: NextAuth v5 por defecto mantiene la sesión por 30 días (persistent).
-    // Si quisieras que el checkbox cambie esto dinámicamente, se requiere 
-    // lógica avanzada en la configuración de la cookie, pero por ahora 
-    // pasamos el formData tal cual para que el login funcione.
+    // ✨ 1. VERIFICAR EL ROL ANTES DEL LOGIN
+    if (email) {
+        const connection = await pool.getConnection();
+        try {
+            const [users]: any = await connection.query(
+                "SELECT role FROM users WHERE email = ? LIMIT 1", 
+                [email]
+            );
+            
+            // Si el usuario existe y es el MARCADOR, cambiamos su destino
+            if (users.length > 0 && users[0].role === 'MARCADOR') {
+                rutaDestino = '/marcador';
+            }
+        } catch (dbError) {
+            console.error("Error verificando el rol:", dbError);
+        } finally {
+            connection.release();
+        }
+    }
 
-    // 2. INICIAR SESIÓN
+    // ✨ 2. INYECTAR LA REDIRECCIÓN A NEXTAUTH
+    // NextAuth v5 detecta automáticamente este parámetro en el formData
+    formData.append('redirectTo', rutaDestino);
+
+    // 3. INICIAR SESIÓN
     await signIn('credentials', formData);
 
   } catch (error) {

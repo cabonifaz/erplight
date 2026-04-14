@@ -17,25 +17,24 @@ import {
   Building, 
   UserCog,
   ChevronDown, 
-  Upload,      
+  Upload,       
   History,
-  TrendingUp, // <- NUEVO
-  BarChart, // <- NUEVO
-  Globe, // ✨ NUEVO: Agregamos el ícono del mundo
+  TrendingUp, 
+  BarChart, 
+  Globe, 
   CalendarDays,
-  Building2
+  Building2,
+  Briefcase // ✨ NUEVO: Ícono para RRHH
 } from "lucide-react";
 
-// --- NUEVO: Le decimos a TypeScript cómo es un ítem del menú ---
 interface MenuItem {
   label: string;
-  icon: any; // Usamos 'any' por simplicidad con los iconos de lucide
-  href?: string; // Opcional porque los dropdowns no tienen href
-  isDropdown?: boolean; // Opcional
-  subItems?: { href: string; label: string; icon: any }[]; // Opcional
+  icon: any; 
+  href?: string; 
+  isDropdown?: boolean; 
+  subItems?: { href: string; label: string; icon: any }[]; 
 }
 
-// 1. ACTUALIZAMOS EL MENÚ BASE aplicando el tipo MenuItem
 export const menuItems: MenuItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { 
@@ -59,17 +58,16 @@ export const menuItems: MenuItem[] = [
     ]
   },
   { href: "/clientes", label: "Clientes / Proveedores", icon: Users },
+  // ✨ NUEVO: Agregamos RRHH aquí
+  { href: "/rrhh", label: "RRHH", icon: Briefcase },
   { 
     label: "Reportes", 
     icon: BarChart, 
     isDropdown: true, 
     subItems: [
-      // 1. RESULTADOS (El Pasado)
-      { href: "/reportes/dashboard-corporativo", label: "Dashboard Corporativo", icon: Building2 }, // ✨ NUEVO REPORTE GENERAL
+      { href: "/reportes/dashboard-corporativo", label: "Dashboard Corporativo", icon: Building2 }, 
       { href: "/reportes/cierre", label: "Cierres Diarios", icon: FileText },
       { href: "/reportes/cierre-mensual", label: "Cierre Mensual", icon: CalendarDays },
-      
-      // 2. ESTIMACIONES (El Futuro)
       { href: "/reportes/proyecciones", label: "Proyección Ventas", icon: TrendingUp },
       { href: "/reportes/proyecciones-global", label: "Proyección Global", icon: Globe }
     ]
@@ -79,7 +77,6 @@ export const menuItems: MenuItem[] = [
 export function Sidebar({ user }: { user?: any }) {
   const pathname = usePathname();
   const [searchTerm, setSearchTerm] = useState("");
-  
   const [openMenus, setOpenMenus] = useState<Record<string, boolean>>({ "Ventas & OC": true });
 
   const toggleMenu = (label: string) => {
@@ -92,26 +89,20 @@ export function Sidebar({ user }: { user?: any }) {
     { href: "/configuracion", label: "Configuración", icon: Settings }, 
   ];
 
-  // --- LÓGICA DE SEGURIDAD ---
-  
-  // 1. Unimos los menús según el rol
   const allAvailableItems = user?.role === 'GERENTE GENERAL' 
     ? [...menuItems, ...adminItems] 
     : menuItems;
 
-  // 2. Aplicamos el filtro de seguridad para ocultar opciones no permitidas
   const displayItems = allAvailableItems.filter(item => {
-    // Regla: Solo Gerente General y Admin de Sucursal ven Ventas & OC
-    if (item.label === "Ventas & OC") {
+    // ✨ ACTUALIZADO: Regla de seguridad para Ventas y RRHH
+    if (item.label === "Ventas & OC" || item.label === "RRHH") {
       return user?.role === "GERENTE GENERAL" || user?.role === "ADMIN_SUCURSAL";
     }
-    return true; // Las demás opciones pasan normal
+    return true; 
   });
 
-  // 3. Filtramos por el término de búsqueda (ya habiendo ocultado lo que no deben ver)
   const filteredItems = displayItems.filter((item) => {
     const matchParent = item.label.toLowerCase().includes(searchTerm.toLowerCase());
-    // Evitamos el error si subItems es undefined
     const matchChild = item.subItems ? item.subItems.some(sub => sub.label.toLowerCase().includes(searchTerm.toLowerCase())) : false;
     return matchParent || matchChild;
   });
@@ -147,7 +138,6 @@ export function Sidebar({ user }: { user?: any }) {
 
             if (item.isDropdown) {
               const isOpen = openMenus[item.label] || searchTerm !== "";
-              // Evitamos el error comprobando que subItems exista
               const isChildActive = item.subItems ? item.subItems.some(sub => pathname.startsWith(sub.href)) : false;
 
               return (

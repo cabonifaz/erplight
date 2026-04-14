@@ -79,6 +79,7 @@ export default function UsuariosClient({ users, branches }: { users: any[], bran
                                 <option value="ADMINISTRADOR_ZONAL">Administrador Zonal</option>
                                 <option value="ADMIN_SUCURSAL">Administrador de Sucursal</option>
                                 <option value="ALMACENERO">Almacenero</option>
+                                <option value="MARCADOR">Marcador </option>
                             </select>
                         </div>
                     </div>
