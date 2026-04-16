@@ -743,3 +743,31 @@ export async function registerPurchaseInvoice(formData: FormData) {
         totalAmount, 
     ]);
 }
+
+// OBTENER REPORTE HISTÓRICO DE COMPRAS
+export async function obtenerReporteCompras(branchId: number, fechaInicio: string, fechaFin: string) {
+    const connection = await pool.getConnection();
+    try {
+        const [rows]: any = await connection.query("CALL sp_compras_reporte_general(?, ?, ?)", [branchId, fechaInicio, fechaFin]);
+        return { success: true, data: rows[0] };
+    } catch (error: any) {
+        console.error("Error Reporte Compras:", error);
+        return { success: false, data: [] };
+    } finally {
+        connection.release();
+    }
+}
+
+// OBTENER PREDICCIÓN INTELIGENTE DE ABASTECIMIENTO
+export async function obtenerPrediccionCompras(branchId: number) {
+    const connection = await pool.getConnection();
+    try {
+        const [rows]: any = await connection.query("CALL sp_compras_prediccion(?)", [branchId]);
+        return { success: true, data: rows[0] };
+    } catch (error: any) {
+        console.error("Error Predicción Compras:", error);
+        return { success: false, data: [] };
+    } finally {
+        connection.release();
+    }
+}

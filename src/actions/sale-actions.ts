@@ -4,7 +4,7 @@ import { pool } from "@/lib/db";
 import { auth } from "@/auth";
 import { revalidatePath } from "next/cache";
 
-// --- 1. FUNCIÓN DE VALIDACIÓN (CON FILTRO DE SPLIT PAYMENT) ---
+// --- 1. FUNCIÓN DE VALIDACIÓN ---
 export async function validateExcelSales(payload: { data: any[], branchId: number }) {
     const session = await auth();
     if (!session?.user?.id) return { success: false, message: "No autorizado", issues: [], canProceed: false };
@@ -39,38 +39,57 @@ export async function validateExcelSales(payload: { data: any[], branchId: numbe
             }
         }
 
-        for (const [nombreProducto, cantidadRequerida] of Object.entries(productosTotalesReales)) {
-            const [prodResult]: any = await connection.query("CALL sp_buscar_producto_por_nombre(?)", [nombreProducto]);
-            const productoRow = prodResult[0];
+        for (const [nombreItem, cantidadRequerida] of Object.entries(productosTotalesReales)) {
+            // ✨ NUEVO: Usamos el buscador inteligente universal
+            const [itemResult]: any = await connection.query("CALL sp_buscar_item_venta(?)", [nombreItem]);
+            const itemRow = itemResult[0]?.[0];
 
-            if (!productoRow || productoRow.length === 0) {
-                issues.push({ producto: nombreProducto, mensaje: "No existe en el maestro de artículos.", tipo: 'error' });
+            if (!itemRow || itemRow.tipo === 'NONE') {
+                issues.push({ producto: nombreItem, mensaje: "No existe en Menús ni en Insumos.", tipo: 'error' });
                 canProceed = false;
                 continue;
             }
 
-            const productId = productoRow[0].id;
+            const itemId = itemRow.item_id;
 
-            const [recetaResult]: any = await connection.query("CALL sp_obtener_receta_producto(?)", [productId]);
-            const recetaRows = recetaResult[0];
+            // Si es un MENÚ, verificamos su receta. Si es un PRODUCTO directo (ej. Gaseosa), verificamos su stock directo.
+            if (itemRow.tipo === 'MENU') {
+                // Nota: Asegúrate de que sp_obtener_receta_producto funcione también con los IDs de los menús
+               const [recetaResult]: any = await connection.query("CALL sp_obtener_receta_menu(?)", [itemId]);
+                const recetaRows = recetaResult[0];
 
-            if (!recetaRows || recetaRows.length === 0) {
-                issues.push({ producto: nombreProducto, mensaje: "No tiene receta configurada. Se descontará como producto directo.", tipo: 'warning' });
-            } else {
-                for (const ingrediente of recetaRows) {
-                    const cantNecesaria = ingrediente.quantity * cantidadRequerida;
-                    const [stockResult]: any = await connection.query("CALL sp_obtener_stock_actual(?, ?)", [ingrediente.component_id, branchId]);
-                    const stockRow = stockResult[0];
-                    const stockActual = stockRow.length > 0 ? Number(Object.values(stockRow[0])[0]) : 0;
-                    
-                    if (stockActual < cantNecesaria) {
-                        issues.push({ 
-                            producto: nombreProducto, 
-                            mensaje: `Stock insuficiente (ID Insumo: ${ingrediente.component_id}). Necesitas ${cantNecesaria}, pero tienes ${stockActual}.`, 
-                            tipo: 'error' 
-                        });
-                        canProceed = false;
+                if (!recetaRows || recetaRows.length === 0) {
+                    issues.push({ producto: nombreItem, mensaje: "El menú no tiene receta configurada.", tipo: 'warning' });
+                } else {
+                    for (const ingrediente of recetaRows) {
+                        const cantNecesaria = ingrediente.quantity * cantidadRequerida;
+                        const [stockResult]: any = await connection.query("CALL sp_obtener_stock_actual(?, ?)", [ingrediente.component_id, branchId]);
+                        const stockRow = stockResult[0];
+                        const stockActual = stockRow.length > 0 ? Number(Object.values(stockRow[0])[0]) : 0;
+                        
+                        if (stockActual < cantNecesaria) {
+                            issues.push({ 
+                                producto: nombreItem, 
+                                mensaje: `Stock insuficiente (ID Insumo: ${ingrediente.component_id}). Necesitas ${cantNecesaria}, pero tienes ${stockActual}.`, 
+                                tipo: 'error' 
+                            });
+                            canProceed = false;
+                        }
                     }
+                }
+            } else if (itemRow.tipo === 'PRODUCTO') {
+                // Validación para productos de venta directa
+                const [stockResult]: any = await connection.query("CALL sp_obtener_stock_actual(?, ?)", [itemId, branchId]);
+                const stockRow = stockResult[0];
+                const stockActual = stockRow.length > 0 ? Number(Object.values(stockRow[0])[0]) : 0;
+                
+                if (stockActual < cantidadRequerida) {
+                    issues.push({ 
+                        producto: nombreItem, 
+                        mensaje: `Stock insuficiente del producto. Necesitas ${cantidadRequerida}, pero tienes ${stockActual}.`, 
+                        tipo: 'error' 
+                    });
+                    canProceed = false;
                 }
             }
         }
@@ -84,7 +103,7 @@ export async function validateExcelSales(payload: { data: any[], branchId: numbe
 }
 
 
-// --- 2. FUNCIÓN DE PROCESAMIENTO (AHORA SÍ CON BUSCADOR INTELIGENTE Y DESGLOSE DE PAGOS POR SP) ---
+// --- 2. FUNCIÓN DE PROCESAMIENTO ---
 export async function processExcelSales(payload: { data: any[], branchId: number }) {
     const session = await auth();
     if (!session?.user?.id) return { success: false, message: "No autorizado" };
@@ -126,26 +145,20 @@ export async function processExcelSales(payload: { data: any[], branchId: number
             const docType = findValue(['tipo de documento']) || 'Ticket';
             const clientDoc = String(findValue(['cliente / ruc / dni']) || '');
 
-            // Capturamos la fecha
             let rawFecha = findValue(['fecha']);
             let fechaExcelFormateada = null;
 
-            // ✨ EL ANALIZADOR DE FECHAS DEFINITIVO
             if (rawFecha) {
                 if (rawFecha instanceof Date) {
-                    // 1. Si ya es una fecha real de JS
                     const tzOffset = rawFecha.getTimezoneOffset() * 60000;
                     fechaExcelFormateada = new Date(rawFecha.getTime() - tzOffset).toISOString().slice(0, 19).replace('T', ' ');
                 } else {
                     let strFecha = String(rawFecha).trim();
-                    
                     if (strFecha.includes('T') && strFecha.includes('Z')) {
-                        // 2. Si viene como texto ISO (Ej: "2026-04-10T20:45:00.000Z")
                         const dateObj = new Date(strFecha);
                         const tzOffset = dateObj.getTimezoneOffset() * 60000;
                         fechaExcelFormateada = new Date(dateObj.getTime() - tzOffset).toISOString().slice(0, 19).replace('T', ' ');
                     } else if (strFecha.includes('/')) {
-                        // 3. Si viene separada por slashes (Ej: 10/04/2026 o 04/10/2026)
                         const [fechaStr, horaStr = '00:00:00'] = strFecha.split(' ');
                         const partes = fechaStr.split('/');
                         if (partes.length === 3) {
@@ -154,7 +167,6 @@ export async function processExcelSales(payload: { data: any[], branchId: number
                             let anio = partes[2];
                             let dia, mes;
 
-                            // Inteligencia para no confundir Abril 10 con Octubre 4
                             if (p1 === 4 && p2 === 10) { mes = '04'; dia = '10'; }
                             else if (p1 === 10 && p2 === 4) { mes = '04'; dia = '10'; }
                             else { dia = String(p1).padStart(2, '0'); mes = String(p2).padStart(2, '0'); }
@@ -163,7 +175,6 @@ export async function processExcelSales(payload: { data: any[], branchId: number
                             fechaExcelFormateada = `${anio}-${mes}-${dia} ${horaF}`;
                         }
                     } else if (!isNaN(Number(strFecha))) {
-                        // 4. Si viene como número serial crudo de Excel (Ej: 46122)
                         const numFecha = Number(strFecha);
                         const dias = numFecha - 25569;
                         const fechaLocal = new Date((dias * 86400 * 1000) + (new Date().getTimezoneOffset() * 60000));
@@ -172,14 +183,12 @@ export async function processExcelSales(payload: { data: any[], branchId: number
                 }
             }
 
-            // Fallback de emergencia
             if (!fechaExcelFormateada) {
                 const now = new Date();
                 const tzOffset = now.getTimezoneOffset() * 60000; 
                 fechaExcelFormateada = new Date(now.getTime() - tzOffset).toISOString().slice(0, 19).replace('T', ' ');
             }
 
-            // Lo guardamos en el agrupador
             if (!ventasAgrupadas.has(ticketId)) {
                 ventasAgrupadas.set(ticketId, {
                     fecha: fechaExcelFormateada,
@@ -187,7 +196,7 @@ export async function processExcelSales(payload: { data: any[], branchId: number
                     clientDoc: clientDoc,    
                     ticketId: ticketId,      
                     metodos: new Set([metodo]), 
-                    desglosePagos: {} as Record<string, number>, // ✨ NUEVO: "Cajón" para separar los montos
+                    desglosePagos: {} as Record<string, number>, 
                     totalVenta: 0,
                     detalles: []
                 });
@@ -195,8 +204,6 @@ export async function processExcelSales(payload: { data: any[], branchId: number
 
             const grupo = ventasAgrupadas.get(ticketId);
             grupo.metodos.add(metodo);
-
-            // ✨ NUEVO: Sumar el dinero de esta fila al método de pago correspondiente (Ej. Yape + 41.89)
             grupo.desglosePagos[metodo] = (grupo.desglosePagos[metodo] || 0) + valorFila;
 
             if (nombreProducto) {
@@ -207,23 +214,20 @@ export async function processExcelSales(payload: { data: any[], branchId: number
                 } else {
                     productoYaExiste.valorTotal += valorFila;
                 }
-                
                 grupo.totalVenta += valorFila;
             }
         }
 
-        // --- BUCLE 2: Inserción en BD usando Procedimientos Almacenados ---
+        // --- BUCLE 2: Inserción en BD ---
         for (const [key, data] of ventasAgrupadas.entries()) {
             const metodoPagoFinal = Array.from(data.metodos).join(" + ");
 
-            // 1. Guardar Cabecera de la Venta
             const [saleResult]: any = await connection.query(
                 "CALL sp_registrar_venta_cabecera(?, ?, ?, ?, ?, ?, ?)", 
                 [branchId, metodoPagoFinal, data.totalVenta, data.fecha, data.docType, data.ticketId, data.clientDoc]
             );
             const saleId = saleResult[0][0].sale_id;
 
-            // ✨ NUEVO 2. Guardar Pagos Individuales (El "Split" real) llamando al nuevo SP
             for (const [nombreMetodo, montoMetodo] of Object.entries(data.desglosePagos)) {
                 await connection.query(
                     "CALL sp_registrar_pago_detalle(?, ?, ?)", 
@@ -231,25 +235,33 @@ export async function processExcelSales(payload: { data: any[], branchId: number
                 );
             }
 
-            // 3. Guardar Detalles de la Venta y Descontar Inventario
             for (const detalle of data.detalles) {
-                const [prodResult]: any = await connection.query("CALL sp_buscar_producto_por_nombre(?)", [detalle.nombre]);
-                if (!prodResult[0] || prodResult[0].length === 0) throw new Error(`El producto "${detalle.nombre}" no existe.`);
-                const productId = prodResult[0][0].id;
+                // ✨ NUEVO: Identificamos si es plato o bebida
+                const [itemResult]: any = await connection.query("CALL sp_buscar_item_venta(?)", [detalle.nombre]);
+                const itemRow = itemResult[0]?.[0];
+                
+                if (!itemRow || itemRow.tipo === 'NONE') throw new Error(`El ítem "${detalle.nombre}" no existe en el sistema.`);
+                
+                const menuId = itemRow.tipo === 'MENU' ? itemRow.item_id : null;
+                const productId = itemRow.tipo === 'PRODUCTO' ? itemRow.item_id : null;
+                const precioUnitarioReal = detalle.valorTotal / detalle.cantidad;
 
-                // Dividimos el total entre la cantidad para enviar el Precio Unitario real al SP
-const precioUnitarioReal = detalle.valorTotal / detalle.cantidad;
-await connection.query("CALL sp_registrar_venta_detalle(?, ?, ?, ?)", [saleId, productId, detalle.cantidad, precioUnitarioReal]);
+                // ✨ Llamamos al nuevo SP que soporta los dos IDs
+                await connection.query("CALL sp_registrar_venta_detalle_v2(?, ?, ?, ?, ?)", 
+                [saleId, productId, menuId, detalle.cantidad, precioUnitarioReal]);
 
-                const [recetaResult]: any = await connection.query("CALL sp_obtener_receta_producto(?)", [productId]);
-                const recetaRows = recetaResult[0];
+                if (itemRow.tipo === 'MENU') {
+                    const [recetaResult]: any = await connection.query("CALL sp_obtener_receta_producto(?)", [itemRow.item_id]);
+                    const recetaRows = recetaResult[0];
 
-                if (recetaRows && recetaRows.length > 0) {
-                    for (const ingrediente of recetaRows) {
-                        const cantidadADescontar = ingrediente.quantity * detalle.cantidad;
-                        await connection.query("CALL sp_registrar_ajuste_inventario(?, ?, 'Salida', ?, ?, ?)", [branchId, userId, ingrediente.component_id, cantidadADescontar, `Venta Ticket ${data.ticketId}`]);
+                    if (recetaRows && recetaRows.length > 0) {
+                        for (const ingrediente of recetaRows) {
+                            const cantidadADescontar = ingrediente.quantity * detalle.cantidad;
+                            await connection.query("CALL sp_registrar_ajuste_inventario(?, ?, 'Salida', ?, ?, ?)", [branchId, userId, ingrediente.component_id, cantidadADescontar, `Venta Ticket ${data.ticketId}`]);
+                        }
                     }
-                } else {
+                } else if (itemRow.tipo === 'PRODUCTO') {
+                    // Si es venta directa, descuenta 1 a 1 de la tabla de insumos
                     await connection.query("CALL sp_registrar_ajuste_inventario(?, ?, 'Salida', ?, ?, ?)", [branchId, userId, productId, detalle.cantidad, `Venta Ticket ${data.ticketId}`]);
                 }
             }
@@ -257,7 +269,7 @@ await connection.query("CALL sp_registrar_venta_detalle(?, ?, ?, ?)", [saleId, p
 
         await connection.commit();
         revalidatePath('/inventario'); 
-        return { success: true, message: "Excel procesado: Ventas ingresadas correctamente con desglose de pagos exacto." };
+        return { success: true, message: "Excel procesado: Ventas ingresadas correctamente con la nueva arquitectura de menús e insumos." };
 
     } catch (error: any) {
         await connection.rollback();
@@ -268,7 +280,7 @@ await connection.query("CALL sp_registrar_venta_detalle(?, ?, ?, ?)", [saleId, p
     }
 }
 
-// --- 3. REPORTE DE VENTAS (Buscador) ---
+// --- 3. REPORTE DE VENTAS ---
 export async function getReporteVentas(filtros: {
     branchId?: number | null;
     fechaInicio?: string | null;

@@ -1,11 +1,10 @@
 import RecipeManagerClient from "./RecipeManagerClient";
-// Asumo que tienes una función similar en tus actions de productos para listar todos.
-// Si se llama diferente, solo ajusta la importación.
 import { getProducts } from "@/actions/product-actions"; 
+import { obtenerMenusParaRecetas } from "@/actions/recipe-actions"; // ✨ NUEVO
 
 export default async function RecetasPage() {
-  // Traemos todos los artículos del maestro de productos
-  const productos = await getProducts();
+  const insumos = await getProducts(); // Arroz, Queso, Salmón...
+  const platos = await obtenerMenusParaRecetas(); // Combos, Makis...
 
   return (
     <div className="p-6 w-full max-w-6xl mx-auto">
@@ -16,8 +15,8 @@ export default async function RecetasPage() {
         </p>
       </div>
       
-      {/* Pasamos los productos al componente cliente interactivo */}
-      <RecipeManagerClient productos={productos} />
+      {/* Pasamos las DOS listas separadas */}
+      <RecipeManagerClient insumos={insumos} platos={platos} />
     </div>
   );
 }

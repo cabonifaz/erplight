@@ -1,22 +1,16 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useSession } from 'next-auth/react'; // IMPORTACIÓN DE NEXTAUTH
+import { useSession } from 'next-auth/react'; 
 import { 
-    getEmpleadosPorSucursal, 
-    crearEmpleado, 
-    editarEmpleado, 
-    registrarAsistencia, 
-    obtenerHorariosSemana, 
-    guardarHorarioEmpleado,
-    obtenerCatalogosRRHH,
-    obtenerEstadoAsistencia,
-    obtenerSucursales,
-    obtenerDisponibilidad, // ✨ NUEVO IMPORT
-    guardarDisponibilidad  // ✨ NUEVO IMPORT
+    getEmpleadosPorSucursal, crearEmpleado, editarEmpleado, registrarAsistencia, 
+    obtenerHorariosSemana, guardarHorarioEmpleado, obtenerCatalogosRRHH, 
+    obtenerEstadoAsistencia, obtenerSucursales, obtenerDisponibilidad, 
+    guardarDisponibilidad, autogenerarHorarioSemana, publicarHorariosSemana, 
+    eliminarHorarioEmpleado,
+    obtenerReporteHoras // ✨ IMPORTACIÓN DEL REPORTE AGREGADA
 } from '@/actions/rrhh-actions';
 
-// Función para obtener el Lunes de la semana actual
 const getLunes = (d: Date) => {
     const date = new Date(d);
     const day = date.getDay();
@@ -25,41 +19,41 @@ const getLunes = (d: Date) => {
 };
 
 export default function RRHHPage() {
-    // 1. OBTENER SESIÓN REAL
-    const { data: session } = useSession();
-    // Le agregamos ( ... as any) para que TypeScript no marque error con nuestros campos personalizados
-    const rolUsuario = (session?.user as any)?.role || 'GERENTE_GENERAL'; 
-    const sucursalUsuario = (session?.user as any)?.branch_id || 4;
+    const { data: session, status } = useSession(); 
+    const rolCrudo = (session?.user as any)?.role || 'GERENTE_GENERAL'; 
+    const rolUsuario = rolCrudo.toUpperCase().replace(' ', '_'); 
+    const sucursalUsuario = (session?.user as any)?.branch_id || 1;
 
     const [activeTab, setActiveTab] = useState('empleados'); 
     const [loading, setLoading] = useState(false);
     
-    // 2. ESTADOS DE SUCURSAL
     const [sucursales, setSucursales] = useState<any[]>([]);
     const [sucursalActiva, setSucursalActiva] = useState<number>(rolUsuario === 'ADMIN_SUCURSAL' ? sucursalUsuario : 1); 
     
-    // 3. ESTADOS DE EMPLEADOS Y MODAL CRUD
     const [empleados, setEmpleados] = useState<any[]>([]);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingId, setEditingId] = useState<number | null>(null);
     const [listaDocumentos, setListaDocumentos] = useState<any[]>([]);
     const [listaCargos, setListaCargos] = useState<any[]>([]);
-    const [formData, setFormData] = useState({ nombres: '', apellidos: '', tipo_documento_id: 0, numero_documento: '', cargo_id: 0, salario_hora: '' });
+    const [formData, setFormData] = useState({ nombres: '', apellidos: '', tipo_documento_id: 0, numero_documento: '', cargo_id: 0, salario_hora: '', fecha_nacimiento: '' });
     
-    // 4. ESTADOS DE ASISTENCIA
     const [horaActual, setHoraActual] = useState(new Date());
     const [empleadoMarcacion, setEmpleadoMarcacion] = useState('');
     const [estadoAsistencia, setEstadoAsistencia] = useState<'PENDIENTE_ENTRADA' | 'PENDIENTE_SALIDA' | 'COMPLETADO' | ''>('');
 
-    // 5. ESTADOS DE HORARIOS
     const [horariosGlobales, setHorariosGlobales] = useState<any[]>([]);
-    const [modalTurno, setModalTurno] = useState({ isOpen: false, empId: 0, empName: '', fechaStr: '', diaName: '', inicio: '', fin: '' });
+    const [modalTurno, setModalTurno] = useState({ isOpen: false, empId: 0, empName: '', fechaStr: '', diaName: '', inicio: '', fin: '', existe: false, estado_actual: 0 });
     const [semanaActual, setSemanaActual] = useState<Date>(getLunes(new Date()));
 
-    // ✨ 6. ESTADOS DE DISPONIBILIDAD (NUEVO)
     const [isDispModalOpen, setIsDispModalOpen] = useState(false);
     const [dispEmp, setDispEmp] = useState({ id: 0, nombre: '' });
     const [dispData, setDispData] = useState<any[]>([]);
+
+    // ✨ ESTADOS PARA EL REPORTE
+    const [reporteInicio, setReporteInicio] = useState<string>(new Date(new Date().setDate(1)).toISOString().split('T')[0]); 
+    const [reporteFin, setReporteFin] = useState<string>(new Date().toISOString().split('T')[0]); 
+    const [reporteDatos, setReporteDatos] = useState<any[]>([]);
+    const [cargandoReporte, setCargandoReporte] = useState(false);
 
     const diasDeLaSemana = Array.from({ length: 7 }).map((_, i) => {
         const d = new Date(semanaActual);
@@ -81,7 +75,6 @@ export default function RRHHPage() {
         setSemanaActual(nuevaFecha);
     };
 
-    // EFECTOS INICIALES
     useEffect(() => {
         const initData = async () => {
             const resCat = await obtenerCatalogosRRHH();
@@ -89,10 +82,7 @@ export default function RRHHPage() {
             const resSuc = await obtenerSucursales();
             if (resSuc.success) {
                 setSucursales(resSuc.data);
-                // Forzar la sucursal activa si es admin y la data ya cargó
-                if (rolUsuario === 'ADMIN_SUCURSAL' && sucursalUsuario) {
-                    setSucursalActiva(sucursalUsuario);
-                }
+                if (rolUsuario === 'ADMIN_SUCURSAL' && sucursalUsuario) setSucursalActiva(sucursalUsuario);
             }
         };
         if (rolUsuario === 'GERENTE_GENERAL' || rolUsuario === 'ADMIN_SUCURSAL') initData();
@@ -102,6 +92,8 @@ export default function RRHHPage() {
         if (sucursalActiva) {
             cargarDatosSucursal();
             setEmpleadoMarcacion('');
+            // Opcional: Limpiar el reporte al cambiar de sucursal
+            setReporteDatos([]);
         }
     }, [sucursalActiva, semanaActual]);
 
@@ -135,16 +127,23 @@ export default function RRHHPage() {
         setLoading(false);
     };
 
-    // CRUD EMPLEADOS
     const handleAbrirNuevo = () => {
         setEditingId(null);
-        setFormData({ nombres: '', apellidos: '', tipo_documento_id: listaDocumentos[0]?.id || 0, numero_documento: '', cargo_id: listaCargos[0]?.id || 0, salario_hora: '' });
+        setFormData({ nombres: '', apellidos: '', tipo_documento_id: listaDocumentos[0]?.id || 0, numero_documento: '', cargo_id: listaCargos[0]?.id || 0, salario_hora: '', fecha_nacimiento: '' });
         setIsModalOpen(true);
     };
 
     const handleAbrirEditar = (emp: any) => {
         setEditingId(emp.id);
-        setFormData({ nombres: emp.nombres || '', apellidos: emp.apellidos || '', tipo_documento_id: emp.tipo_documento_id || (listaDocumentos[0]?.id || 0), numero_documento: emp.numero_documento || '', cargo_id: emp.cargo_id || (listaCargos[0]?.id || 0), salario_hora: emp.salario_hora || '' });
+        setFormData({ 
+            nombres: emp.nombres || '', 
+            apellidos: emp.apellidos || '', 
+            tipo_documento_id: emp.tipo_documento_id || (listaDocumentos[0]?.id || 0), 
+            numero_documento: emp.numero_documento || '', 
+            cargo_id: emp.cargo_id || (listaCargos[0]?.id || 0), 
+            salario_hora: emp.salario_hora || '',
+            fecha_nacimiento: emp.fecha_nacimiento ? new Date(emp.fecha_nacimiento).toISOString().split('T')[0] : '' 
+        });
         setIsModalOpen(true);
     };
 
@@ -155,7 +154,6 @@ export default function RRHHPage() {
         setLoading(false);
     };
 
-    // ASISTENCIA
     const handleMarcarAsistencia = async () => {
         if(!empleadoMarcacion) return alert("Selecciona usuario.");
         setLoading(true);
@@ -168,7 +166,6 @@ export default function RRHHPage() {
         setLoading(false);
     };
 
-    // HORARIOS
     const calcularHoras = (inicio: string, fin: string) => {
         if (!inicio || !fin) return 0;
         const [hInicio, mInicio] = inicio.split(':').map(Number);
@@ -179,15 +176,45 @@ export default function RRHHPage() {
     };
 
     const abrirEdicionCelda = (emp: any, dia: any, turnoActual: any) => {
-        setModalTurno({ isOpen: true, empId: emp.id, empName: emp.nombre_completo, fechaStr: dia.fechaStr, diaName: dia.nombre, inicio: turnoActual?.hora_inicio || '', fin: turnoActual?.hora_fin || '' });
+        setModalTurno({ 
+            isOpen: true, empId: emp.id, empName: emp.nombre_completo, 
+            fechaStr: dia.fechaStr, diaName: dia.nombre, 
+            inicio: turnoActual?.hora_inicio || '', 
+            fin: turnoActual?.hora_fin || '',
+            existe: !!turnoActual,
+            estado_actual: turnoActual ? turnoActual.estado : 0
+        });
     };
 
-    const handleGuardarTurnoCelda = async () => {
+    const handleGuardarTurnoCelda = async (forzar: boolean = false) => {
         if (!modalTurno.inicio || !modalTurno.fin) return alert('Completa las horas');
         setLoading(true);
         const horasTotales = calcularHoras(modalTurno.inicio, modalTurno.fin);
-        const res = await guardarHorarioEmpleado(modalTurno.empId, modalTurno.fechaStr, modalTurno.inicio, modalTurno.fin, horasTotales);
         
+        const res = await guardarHorarioEmpleado(modalTurno.empId, modalTurno.fechaStr, modalTurno.inicio, modalTurno.fin, horasTotales, forzar, modalTurno.estado_actual);
+        
+        if (res.requiresConfirm) {
+            if (window.confirm(res.message)) {
+                handleGuardarTurnoCelda(true); 
+            } else {
+                setLoading(false);
+            }
+            return;
+        }
+
+        if(res.success) {
+            setModalTurno({ ...modalTurno, isOpen: false });
+            cargarDatosSucursal(); 
+        } else {
+            alert(res.message);
+        }
+        setLoading(false);
+    };
+
+    const handleEliminarTurnoCelda = async () => {
+        if (!confirm('¿Estás seguro de eliminar este turno?')) return;
+        setLoading(true);
+        const res = await eliminarHorarioEmpleado(modalTurno.empId, modalTurno.fechaStr);
         if(res.success) {
             setModalTurno({ ...modalTurno, isOpen: false });
             cargarDatosSucursal(); 
@@ -195,21 +222,38 @@ export default function RRHHPage() {
         setLoading(false);
     };
 
-    // ✨ FUNCIONES DE DISPONIBILIDAD (NUEVO)
+    const handleAutogenerar = async () => {
+        if (!confirm("Esto asignará turnos automáticamente (en borrador) según la disponibilidad de cada empleado para esta semana. ¿Continuar?")) return;
+        setLoading(true);
+        const fechaFin = new Date(semanaActual);
+        fechaFin.setDate(fechaFin.getDate() + 6); 
+        const res = await autogenerarHorarioSemana(sucursalActiva, semanaActual.toISOString().split('T')[0], fechaFin.toISOString().split('T')[0]);
+        alert(res.message);
+        if (res.success) cargarDatosSucursal();
+        setLoading(false);
+    };
+
+    const handlePublicar = async () => {
+        if (!confirm("¿Estás seguro de APLICAR todos los borradores de esta semana? Ya no podrán ser modificados sin dejar rastro.")) return;
+        setLoading(true);
+        const fechaFin = new Date(semanaActual);
+        fechaFin.setDate(fechaFin.getDate() + 6); 
+        const res = await publicarHorariosSemana(sucursalActiva, semanaActual.toISOString().split('T')[0], fechaFin.toISOString().split('T')[0]);
+        alert(res.message);
+        if (res.success) cargarDatosSucursal();
+        setLoading(false);
+    };
+
     const handleAbrirDisponibilidad = async (emp: any) => {
         setLoading(true);
         setDispEmp({ id: emp.id, nombre: emp.nombre_completo });
-        
         const res = await obtenerDisponibilidad(emp.id);
         const dbDisp = res.success ? res.data : [];
 
-        // Armamos un array con los 7 días, marcando activo si ya existe en la BD
         const initDisp = nombresDiasFijos.map(d => {
             const encontrado = dbDisp.find((x: any) => x.dia_semana === d.id);
             return {
-                dia_semana: d.id,
-                nombre: d.nombre,
-                activo: !!encontrado,
+                dia_semana: d.id, nombre: d.nombre, activo: !!encontrado,
                 inicio: encontrado ? encontrado.hora_inicio : '08:00',
                 fin: encontrado ? encontrado.hora_fin : '18:00'
             };
@@ -226,37 +270,42 @@ export default function RRHHPage() {
 
     const handleGuardarDisponibilidadTotal = async () => {
         setLoading(true);
-        // Filtramos solo los días que el usuario marcó como "activos"
-        const datosParaGuardar = dispData.filter(d => d.activo).map(d => ({
-            dia_semana: d.dia_semana,
-            hora_inicio: d.inicio,
-            hora_fin: d.fin
-        }));
-
+        const datosParaGuardar = dispData.filter(d => d.activo).map(d => ({ dia_semana: d.dia_semana, hora_inicio: d.inicio, hora_fin: d.fin }));
         const res = await guardarDisponibilidad(dispEmp.id, datosParaGuardar);
-        if (res.success) {
-            setIsDispModalOpen(false);
-            alert("¡Disponibilidad guardada con éxito!");
-        } else {
-            alert(res.message);
-        }
+        if (res.success) { setIsDispModalOpen(false); alert("¡Disponibilidad guardada con éxito!"); } 
+        else alert(res.message);
         setLoading(false);
     };
 
+    // ✨ FUNCIÓN PARA GENERAR REPORTE
+    const handleGenerarReporte = async () => {
+        setCargandoReporte(true);
+        const res = await obtenerReporteHoras(sucursalActiva, reporteInicio, reporteFin);
+        if (res.success) setReporteDatos(res.data);
+        else alert("Error al obtener el reporte.");
+        setCargandoReporte(false);
+    };
+
+    if (status === 'loading') return <div className="min-h-[60vh] flex justify-center items-center font-bold text-gray-500">Cargando credenciales...</div>;
 
     if (rolUsuario !== 'GERENTE_GENERAL' && rolUsuario !== 'ADMIN_SUCURSAL') {
-        return ( <div className="flex flex-col items-center justify-center min-h-[60vh]"><span className="text-6xl mb-4">⛔</span><h1 className="text-2xl font-bold text-gray-800">Acceso Restringido</h1></div> );
+        return ( 
+            <div className="flex flex-col items-center justify-center min-h-[60vh]">
+                <span className="text-6xl mb-4">⛔</span>
+                <h1 className="text-2xl font-bold text-gray-800">Acceso Restringido</h1>
+                <p className="mt-2 text-gray-500">Tu rol en la base de datos es: <span className="font-bold text-red-600">{rolCrudo}</span></p>
+                <p className="text-xs text-gray-400 mt-1">El sistema esperaba: GERENTE_GENERAL o ADMIN_SUCURSAL</p>
+            </div> 
+        );
     }
 
     const nombreSucursal = sucursales.find(s => s.id === sucursalActiva)?.name || 'Cargando...';
-
     const fechaFinSemana = new Date(semanaActual);
     fechaFinSemana.setDate(fechaFinSemana.getDate() + 6);
     const tituloSemana = `${semanaActual.toLocaleDateString('es-PE', { day: 'numeric', month: 'short' })} al ${fechaFinSemana.toLocaleDateString('es-PE', { day: 'numeric', month: 'short' })}`;
 
     return (
         <div className="p-6 w-full max-w-7xl mx-auto space-y-6">
-            {/* CABECERA */}
             <div className="border-b pb-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">👥 Recursos Humanos</h1>
@@ -272,11 +321,12 @@ export default function RRHHPage() {
                 </div>
             </div>
 
-            {/* PESTAÑAS */}
-            <div className="flex space-x-1 bg-gray-100 p-1 rounded-lg">
+            <div className="flex flex-wrap gap-1 bg-gray-100 p-1 rounded-lg">
                 <button onClick={() => setActiveTab('empleados')} className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${activeTab === 'empleados' ? 'bg-white shadow text-blue-700' : 'text-gray-600 hover:text-gray-900'}`}>Lista de Personal</button>
                 <button onClick={() => setActiveTab('asistencia')} className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${activeTab === 'asistencia' ? 'bg-white shadow text-blue-700' : 'text-gray-600 hover:text-gray-900'}`}>Control de Asistencia</button>
                 <button onClick={() => setActiveTab('horarios')} className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${activeTab === 'horarios' ? 'bg-white shadow text-blue-700' : 'text-gray-600 hover:text-gray-900'}`}>Planificador Semanal</button>
+                {/* ✨ NUEVO BOTÓN DE PESTAÑA: REPORTES */}
+                <button onClick={() => setActiveTab('reportes')} className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${activeTab === 'reportes' ? 'bg-white shadow text-blue-700' : 'text-gray-600 hover:text-gray-900'}`}>Reportes</button>
             </div>
 
             <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 min-h-[400px]">
@@ -307,7 +357,6 @@ export default function RRHHPage() {
                                                         <div className="flex justify-center gap-3">
                                                             <button onClick={() => handleAbrirEditar(emp)} className="text-blue-600 hover:text-blue-800 font-medium">Editar</button>
                                                             <span className="text-gray-300">|</span>
-                                                            {/* ✨ NUEVO BOTÓN DE DISPONIBILIDAD */}
                                                             <button onClick={() => handleAbrirDisponibilidad(emp)} className="text-orange-600 hover:text-orange-800 font-medium">⏳ Disponibilidad</button>
                                                         </div>
                                                     </td>
@@ -325,32 +374,17 @@ export default function RRHHPage() {
                 {activeTab === 'asistencia' && (
                     <div className="flex flex-col items-center py-6">
                         <h2 className="text-2xl font-bold text-gray-800 mb-2">Reloj de Control de Personal</h2>
-                        <p className="text-gray-500 mb-8">Selecciona tu usuario y marca tu ingreso o salida.</p>
-                        
                         <div className="bg-gray-900 text-white p-8 rounded-2xl shadow-inner mb-8 text-center min-w-[300px]">
                             <p className="text-5xl font-mono tracking-wider font-bold">{horaActual.toLocaleTimeString('es-PE', { hour12: false })}</p>
                             <p className="text-gray-400 mt-2 font-medium capitalize">{horaActual.toLocaleDateString('es-PE', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
                         </div>
-
-                        <div className="w-full max-w-md bg-gray-50 p-6 rounded-xl border border-gray-200 shadow-sm mt-8">
-                            <label className="block text-sm font-bold text-gray-700 mb-2">Empleado:</label>
+                        <div className="w-full max-w-md bg-gray-50 p-6 rounded-xl border border-gray-200 shadow-sm">
                             <select className="w-full p-3 border border-gray-300 rounded-lg mb-6 bg-white focus:ring-2 focus:ring-blue-500" value={empleadoMarcacion} onChange={(e) => setEmpleadoMarcacion(e.target.value)}>
                                 <option value="">-- Selecciona tu nombre --</option>
                                 {empleados.map(emp => <option key={emp.id} value={emp.id}>{emp.nombre_completo}</option>)}
                             </select>
-                            <button 
-                                onClick={handleMarcarAsistencia} 
-                                disabled={loading || !empleadoMarcacion || estadoAsistencia === 'COMPLETADO'}
-                                className={`w-full py-4 font-bold text-lg rounded-lg shadow-md transition-all disabled:opacity-50 ${
-                                    estadoAsistencia === 'PENDIENTE_SALIDA' ? 'bg-red-600 hover:bg-red-700 text-white' :
-                                    estadoAsistencia === 'COMPLETADO' ? 'bg-gray-200 text-gray-500 cursor-not-allowed' :
-                                    'bg-blue-600 hover:bg-blue-700 text-white'
-                                }`}
-                            >
-                                {loading ? 'Procesando...' : 
-                                 estadoAsistencia === 'PENDIENTE_SALIDA' ? '👇 MARCAR SALIDA' :
-                                 estadoAsistencia === 'COMPLETADO' ? '✅ TURNO COMPLETADO' :
-                                 '👆 MARCAR ENTRADA'}
+                            <button onClick={handleMarcarAsistencia} disabled={loading || !empleadoMarcacion || estadoAsistencia === 'COMPLETADO'} className={`w-full py-4 font-bold text-lg rounded-lg shadow-md transition-all disabled:opacity-50 ${estadoAsistencia === 'PENDIENTE_SALIDA' ? 'bg-red-600 hover:bg-red-700 text-white' : estadoAsistencia === 'COMPLETADO' ? 'bg-gray-200 text-gray-500 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}>
+                                {loading ? 'Procesando...' : estadoAsistencia === 'PENDIENTE_SALIDA' ? ' MARCAR SALIDA' : estadoAsistencia === 'COMPLETADO' ? '✅ TURNO COMPLETADO' : ' MARCAR ENTRADA'}
                             </button>
                         </div>
                     </div>
@@ -365,16 +399,19 @@ export default function RRHHPage() {
                                 <p className="text-sm text-gray-500">Asigna turnos por fechas específicas.</p>
                             </div>
                             <div className="flex items-center gap-4 mt-4 sm:mt-0">
-                                <button onClick={() => cambiarSemana(-7)} className="p-2 bg-white border border-gray-300 rounded hover:bg-gray-100 font-bold px-4 shadow-sm">
-                                    ← Semana Anterior
-                                </button>
-                                <span className="font-bold text-blue-800 text-lg uppercase tracking-wide min-w-[180px] text-center">
-                                    {tituloSemana}
-                                </span>
-                                <button onClick={() => cambiarSemana(7)} className="p-2 bg-white border border-gray-300 rounded hover:bg-gray-100 font-bold px-4 shadow-sm">
-                                    Siguiente Semana →
-                                </button>
+                                <button onClick={() => cambiarSemana(-7)} className="p-2 bg-white border border-gray-300 rounded hover:bg-gray-100 font-bold px-4 shadow-sm">← Anterior</button>
+                                <span className="font-bold text-blue-800 text-lg uppercase tracking-wide min-w-[180px] text-center">{tituloSemana}</span>
+                                <button onClick={() => cambiarSemana(7)} className="p-2 bg-white border border-gray-300 rounded hover:bg-gray-100 font-bold px-4 shadow-sm">Siguiente →</button>
                             </div>
+                        </div>
+
+                        <div className="flex gap-4 mb-4">
+                            <button onClick={handleAutogenerar} disabled={loading} className="px-4 py-2 bg-purple-100 text-purple-700 font-bold border border-purple-200 rounded-lg hover:bg-purple-200 transition-colors shadow-sm disabled:opacity-50">
+                                Autogenerar Borradores
+                            </button>
+                            <button onClick={handlePublicar} disabled={loading} className="px-4 py-2 bg-green-600 text-white font-bold rounded-lg hover:bg-green-700 transition-colors shadow-md disabled:opacity-50">
+                                Aplicar / Publicar Semana
+                            </button>
                         </div>
                         
                         {loading && horariosGlobales.length === 0 ? <p className="text-center py-10">Cargando turnos...</p> : (
@@ -396,10 +433,7 @@ export default function RRHHPage() {
                                             <tr><td colSpan={9} className="p-6 text-center text-gray-500">No hay personal registrado en esta sede.</td></tr>
                                         ) : (
                                             empleados.map((emp) => {
-                                                const totalHorasSemana = horariosGlobales
-                                                    .filter(h => h.employee_id === emp.id)
-                                                    .reduce((sum, h) => sum + Number(h.horas_totales), 0);
-
+                                                const totalHorasSemana = horariosGlobales.filter(h => h.employee_id === emp.id).reduce((sum, h) => sum + Number(h.horas_totales), 0);
                                                 return (
                                                     <tr key={emp.id} className="hover:bg-blue-50 transition-colors group">
                                                         <td className="p-3 border-r border-gray-200 bg-gray-50 group-hover:bg-blue-100">
@@ -408,18 +442,25 @@ export default function RRHHPage() {
                                                         </td>
                                                         {diasDeLaSemana.map(dia => {
                                                             const turno = horariosGlobales.find(h => h.employee_id === emp.id && new Date(h.fecha).toISOString().split('T')[0] === dia.fechaStr);
+                                                            
+                                                            const isBorrador = turno && turno.estado === 0;
+                                                            const cellClass = turno 
+                                                                ? (isBorrador ? "bg-yellow-50 text-yellow-800 border-2 border-dashed border-yellow-300" : "bg-green-100 text-green-800 border-2 border-solid border-green-200")
+                                                                : "text-gray-300 hover:text-blue-500";
+
                                                             return (
                                                                 <td 
                                                                     key={dia.fechaStr} 
                                                                     onClick={() => abrirEdicionCelda(emp, dia, turno)}
-                                                                    className="p-3 border-r border-gray-200 text-center cursor-pointer transition-all hover:ring-2 hover:ring-inset hover:ring-blue-400"
+                                                                    className={`p-3 border-r border-gray-200 text-center cursor-pointer transition-all hover:ring-2 hover:ring-inset hover:ring-blue-400`}
                                                                 >
                                                                     {turno ? (
-                                                                        <div className="bg-green-100 text-green-800 rounded px-2 py-1 font-medium shadow-sm inline-block">
+                                                                        <div className={`rounded px-2 py-1 font-medium shadow-sm inline-block ${cellClass}`}>
                                                                             {turno.hora_inicio} - {turno.hora_fin}
+                                                                            {isBorrador && <span className="ml-1 text-[10px] uppercase font-bold text-yellow-600">Borrador</span>}
                                                                         </div>
                                                                     ) : (
-                                                                        <span className="text-gray-300 hover:text-blue-500 text-xl font-bold">+</span>
+                                                                        <span className="text-xl font-bold">+</span>
                                                                     )}
                                                                 </td>
                                                             );
@@ -437,44 +478,127 @@ export default function RRHHPage() {
                         )}
                     </div>
                 )}
+
+                {/* ✨ -------------------- TAB 4: REPORTES -------------------- ✨ */}
+                {activeTab === 'reportes' && (
+                    <div className="space-y-6">
+                        <div className="flex flex-col sm:flex-row justify-between items-center bg-blue-50 p-6 rounded-xl border border-blue-100 shadow-sm">
+                            <div>
+                                <h2 className="text-xl font-black text-blue-900">Reporte de Planilla</h2>
+                                <p className="text-sm text-blue-700 font-medium">Calcula el total de horas oficiales por empleado.</p>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-3 mt-4 sm:mt-0">
+                                <div className="bg-white p-2 rounded-lg border border-blue-200 flex items-center gap-2 shadow-sm">
+                                    <span className="text-xs font-bold text-gray-500 uppercase">Desde</span>
+                                    <input type="date" className="p-1 outline-none text-sm font-bold text-gray-800" value={reporteInicio} onChange={e => setReporteInicio(e.target.value)} />
+                                </div>
+                                <div className="bg-white p-2 rounded-lg border border-blue-200 flex items-center gap-2 shadow-sm">
+                                    <span className="text-xs font-bold text-gray-500 uppercase">Hasta</span>
+                                    <input type="date" className="p-1 outline-none text-sm font-bold text-gray-800" value={reporteFin} onChange={e => setReporteFin(e.target.value)} />
+                                </div>
+                                <button onClick={handleGenerarReporte} disabled={cargandoReporte} className="bg-blue-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-blue-700 shadow-md transition-all disabled:opacity-50">
+                                    {cargandoReporte ? 'Calculando...' : 'Generar'}
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="overflow-x-auto border border-gray-200 rounded-lg shadow-sm">
+                            <table className="min-w-full text-left text-sm whitespace-nowrap">
+                                <thead className="bg-gray-800 text-white">
+                                    <tr>
+                                        <th className="p-4 font-semibold">Personal</th>
+                                        <th className="p-4 font-semibold text-center">Documento</th>
+                                        <th className="p-4 font-semibold text-center">Cargo</th>
+                                        <th className="p-4 font-black text-center text-yellow-400 bg-gray-900 text-base">Total Horas</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-200 bg-white">
+                                    {reporteDatos.length === 0 ? (
+                                        <tr><td colSpan={4} className="p-10 text-center text-gray-500 font-medium">Selecciona un rango de fechas y haz clic en "Generar".</td></tr>
+                                    ) : (
+                                        reporteDatos.map((row, i) => (
+                                            <tr key={i} className="hover:bg-gray-50 transition-colors">
+                                                <td className="p-4 font-bold text-gray-800">{row.nombre_completo}</td>
+                                                <td className="p-4 text-center text-gray-600 font-mono">{row.numero_documento}</td>
+                                                <td className="p-4 text-center"><span className="bg-gray-100 border border-gray-200 text-gray-700 px-3 py-1 rounded-md text-xs font-bold">{row.cargo}</span></td>
+                                                <td className="p-4 text-center font-black text-xl text-blue-600">{row.total_horas} <span className="text-sm font-bold text-gray-400">hrs</span></td>
+                                            </tr>
+                                        ))
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* -------------------- MODAL: CREAR/EDITAR EMPLEADO -------------------- */}
             {isModalOpen && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]">
-                    <div className="bg-white p-6 rounded-lg shadow-lg w-full max-w-md">
-                        <h3 className="text-xl font-bold mb-4 text-gray-800">
+                    <div className="bg-white p-6 rounded-lg shadow-2xl w-full max-w-lg">
+                        <h3 className="text-2xl font-bold mb-6 text-gray-800 border-b pb-2">
                             {editingId ? 'Editar Empleado' : 'Registrar Nuevo Empleado'}
                         </h3>
                         <div className="space-y-4">
                             <div className="grid grid-cols-2 gap-4">
-                                <div><label className="block text-sm font-medium text-gray-700">Nombres</label><input type="text" className="mt-1 w-full p-2 border rounded-md" value={formData.nombres} onChange={e => setFormData({...formData, nombres: e.target.value})} /></div>
-                                <div><label className="block text-sm font-medium text-gray-700">Apellidos</label><input type="text" className="mt-1 w-full p-2 border rounded-md" value={formData.apellidos} onChange={e => setFormData({...formData, apellidos: e.target.value})} /></div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Nombres</label>
+                                    <input type="text" className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500" value={formData.nombres} onChange={e => setFormData({...formData, nombres: e.target.value})} />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Apellidos</label>
+                                    <input type="text" className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500" value={formData.apellidos} onChange={e => setFormData({...formData, apellidos: e.target.value})} />
+                                </div>
                             </div>
+                            
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700">Tipo de Doc.</label>
-                                    <select className="mt-1 w-full p-2 border rounded-md bg-white text-sm" value={formData.tipo_documento_id} onChange={e => setFormData({...formData, tipo_documento_id: Number(e.target.value)})}>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Tipo de Doc.</label>
+                                    <select 
+                                        className="w-full p-2 pr-8 truncate border border-gray-300 rounded-md bg-white focus:ring-2 focus:ring-blue-500" 
+                                        value={formData.tipo_documento_id} 
+                                        onChange={e => setFormData({...formData, tipo_documento_id: Number(e.target.value)})}
+                                    >
                                         <option value={0} disabled>Seleccione...</option>
                                         {listaDocumentos.map(doc => <option key={doc.id} value={doc.id}>{doc.description}</option>)}
                                     </select>
                                 </div>
-                                <div><label className="block text-sm font-medium text-gray-700">Número de Documento</label><input type="text" className="mt-1 w-full p-2 border rounded-md" value={formData.numero_documento} onChange={e => setFormData({...formData, numero_documento: e.target.value})} /></div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Número de Doc.</label>
+                                    <input type="text" className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500" value={formData.numero_documento} onChange={e => setFormData({...formData, numero_documento: e.target.value})} />
+                                </div>
                             </div>
+                            
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700">Cargo</label>
-                                    <select className="mt-1 w-full p-2 border rounded-md bg-white text-sm" value={formData.cargo_id} onChange={e => setFormData({...formData, cargo_id: Number(e.target.value)})}>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Cargo</label>
+                                    <select className="w-full p-2 border border-gray-300 rounded-md bg-white focus:ring-2 focus:ring-blue-500" value={formData.cargo_id} onChange={e => setFormData({...formData, cargo_id: Number(e.target.value)})}>
                                         <option value={0} disabled>Seleccione...</option>
                                         {listaCargos.map(cargo => <option key={cargo.id} value={cargo.id}>{cargo.description}</option>)}
                                     </select>
                                 </div>
-                                <div><label className="block text-sm font-medium text-gray-700">Salario Hora (S/)</label><input type="number" step="0.10" className="mt-1 w-full p-2 border rounded-md" value={formData.salario_hora} onChange={e => setFormData({...formData, salario_hora: e.target.value})} /></div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Salario Hora (S/)</label>
+                                    <input type="number" step="0.10" className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500" value={formData.salario_hora} onChange={e => setFormData({...formData, salario_hora: e.target.value})} />
+                                </div>
                             </div>
-                            <div className="flex justify-end gap-3 mt-6">
-                                <button onClick={() => setIsModalOpen(false)} className="px-4 py-2 text-gray-600 bg-gray-100 rounded-md hover:bg-gray-200">Cancelar</button>
-                                <button onClick={handleGuardarEmpleado} disabled={loading} className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50">
-                                    {loading ? 'Guardando...' : (editingId ? 'Actualizar' : 'Guardar')}
+
+                            <div className="mt-2">
+                                <label className="block text-sm font-bold text-gray-700 mb-1">Fecha de Nacimiento</label>
+                                <input 
+                                    type="date" 
+                                    className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500" 
+                                    value={formData.fecha_nacimiento} 
+                                    onChange={e => setFormData({...formData, fecha_nacimiento: e.target.value})} 
+                                />
+                            </div>
+
+                            <div className="flex justify-end gap-3 mt-6 pt-4 border-t">
+                                <button onClick={() => setIsModalOpen(false)} className="px-5 py-2 text-gray-600 bg-gray-100 font-bold rounded-lg hover:bg-gray-200 transition-colors">
+                                    Cancelar
+                                </button>
+                                <button onClick={handleGuardarEmpleado} disabled={loading} className="px-5 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors">
+                                    {loading ? 'Guardando...' : (editingId ? 'Actualizar' : 'Guardar Empleado')}
                                 </button>
                             </div>
                         </div>
@@ -482,7 +606,7 @@ export default function RRHHPage() {
                 </div>
             )}
 
-            {/* ✨ NUEVO MODAL: CONFIGURAR DISPONIBILIDAD (REGLAS DEL EMPLEADO) */}
+            {/* -------------------- MODAL: DISPONIBILIDAD -------------------- */}
             {isDispModalOpen && (
                 <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[70]">
                     <div className="bg-white p-6 rounded-2xl shadow-2xl w-full max-w-lg">
@@ -490,51 +614,24 @@ export default function RRHHPage() {
                             <h3 className="text-xl font-bold text-gray-800">Reglas de Disponibilidad</h3>
                             <p className="text-sm text-gray-500">Configura qué días y a qué hora puede trabajar <strong>{dispEmp.nombre}</strong>.</p>
                         </div>
-                        
                         <div className="space-y-3 max-h-[50vh] overflow-y-auto pr-2">
                             {dispData.map((dia) => (
                                 <div key={dia.dia_semana} className={`flex items-center gap-3 p-3 border rounded-lg transition-colors ${dia.activo ? 'border-orange-300 bg-orange-50' : 'border-gray-200 bg-gray-50'}`}>
-                                    
-                                    {/* Checkbox para Activar/Desactivar el día */}
                                     <label className="flex items-center gap-2 w-32 cursor-pointer">
-                                        <input 
-                                            type="checkbox" 
-                                            className="w-5 h-5 text-orange-600 rounded focus:ring-orange-500"
-                                            checked={dia.activo}
-                                            onChange={(e) => handleCambioDisp(dia.dia_semana, 'activo', e.target.checked)}
-                                        />
+                                        <input type="checkbox" className="w-5 h-5 text-orange-600 rounded focus:ring-orange-500" checked={dia.activo} onChange={(e) => handleCambioDisp(dia.dia_semana, 'activo', e.target.checked)}/>
                                         <span className={`font-bold ${dia.activo ? 'text-orange-800' : 'text-gray-400'}`}>{dia.nombre}</span>
                                     </label>
-
-                                    {/* Rango de Horas (Solo se habilita si el día está activo) */}
                                     <div className="flex items-center gap-2 flex-1">
-                                        <input 
-                                            type="time" 
-                                            disabled={!dia.activo}
-                                            className="w-full p-2 border rounded-md text-sm disabled:opacity-50 disabled:bg-gray-100" 
-                                            value={dia.inicio} 
-                                            onChange={(e) => handleCambioDisp(dia.dia_semana, 'inicio', e.target.value)} 
-                                        />
+                                        <input type="time" disabled={!dia.activo} className="w-full p-2 border rounded-md text-sm disabled:opacity-50 disabled:bg-gray-100" value={dia.inicio} onChange={(e) => handleCambioDisp(dia.dia_semana, 'inicio', e.target.value)} />
                                         <span className="text-gray-400 font-bold">-</span>
-                                        <input 
-                                            type="time" 
-                                            disabled={!dia.activo}
-                                            className="w-full p-2 border rounded-md text-sm disabled:opacity-50 disabled:bg-gray-100" 
-                                            value={dia.fin} 
-                                            onChange={(e) => handleCambioDisp(dia.dia_semana, 'fin', e.target.value)} 
-                                        />
+                                        <input type="time" disabled={!dia.activo} className="w-full p-2 border rounded-md text-sm disabled:opacity-50 disabled:bg-gray-100" value={dia.fin} onChange={(e) => handleCambioDisp(dia.dia_semana, 'fin', e.target.value)} />
                                     </div>
                                 </div>
                             ))}
                         </div>
-
                         <div className="flex justify-end gap-3 mt-6 pt-4 border-t">
-                            <button onClick={() => setIsDispModalOpen(false)} className="px-5 py-2 text-gray-600 bg-gray-100 font-bold rounded-xl hover:bg-gray-200">
-                                Cancelar
-                            </button>
-                            <button onClick={handleGuardarDisponibilidadTotal} disabled={loading} className="px-5 py-2 bg-orange-600 text-white font-bold rounded-xl hover:bg-orange-700 disabled:opacity-50">
-                                {loading ? 'Guardando...' : 'Guardar Reglas'}
-                            </button>
+                            <button onClick={() => setIsDispModalOpen(false)} className="px-5 py-2 text-gray-600 bg-gray-100 font-bold rounded-xl hover:bg-gray-200">Cancelar</button>
+                            <button onClick={handleGuardarDisponibilidadTotal} disabled={loading} className="px-5 py-2 bg-orange-600 text-white font-bold rounded-xl hover:bg-orange-700 disabled:opacity-50">{loading ? 'Guardando...' : 'Guardar Reglas'}</button>
                         </div>
                     </div>
                 </div>
@@ -560,13 +657,22 @@ export default function RRHHPage() {
                             </div>
                         </div>
 
-                        <div className="flex justify-end gap-3">
-                            <button onClick={() => setModalTurno({...modalTurno, isOpen: false})} className="px-5 py-3 text-gray-600 bg-gray-100 font-bold rounded-xl hover:bg-gray-200">
-                                Cancelar
-                            </button>
-                            <button onClick={handleGuardarTurnoCelda} disabled={loading} className="px-5 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 disabled:opacity-50">
-                                {loading ? '...' : 'Guardar'}
-                            </button>
+                        <div className="flex justify-between items-center mt-2">
+                            <div>
+                                {modalTurno.existe && (
+                                    <button onClick={handleEliminarTurnoCelda} disabled={loading} className="px-4 py-3 bg-red-100 text-red-600 font-bold rounded-xl hover:bg-red-200 transition-colors disabled:opacity-50">
+                                        Eliminar
+                                    </button>
+                                )}
+                            </div>
+                            <div className="flex gap-3">
+                                <button onClick={() => setModalTurno({...modalTurno, isOpen: false})} className="px-5 py-3 text-gray-600 bg-gray-100 font-bold rounded-xl hover:bg-gray-200">
+                                    Cancelar
+                                </button>
+                                <button onClick={() => handleGuardarTurnoCelda(false)} disabled={loading} className="px-5 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 disabled:opacity-50">
+                                    {loading ? '...' : 'Guardar'}
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>

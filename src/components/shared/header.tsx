@@ -10,6 +10,8 @@ import { cn } from "@/lib/utils";
 import { useState } from "react";
 // Importamos el UserNav
 import { UserNav } from "./user-nav";
+// ✨ IMPORTAMOS LA CAMPANA ✨
+import NotificationBell from "../NotificationBell";
 
 // Definimos las props que espera el Header
 interface HeaderProps {
@@ -47,12 +49,12 @@ export function Header({ user }: HeaderProps) {
             <nav className="flex flex-col gap-1 p-4">
               {menuItems.map((item) => {
                 const Icon = item.icon;
-                const isActive = pathname.startsWith(item.href);
+                const isActive = pathname?.startsWith(item.href || "") ?? false;
 
                 return (
                   <Link
                     key={item.href}
-                    href={item.href}
+                    href={item.href || "#"}
                     onClick={() => setIsOpen(false)}
                     className={cn(
                       "flex items-center px-3 py-3 text-sm font-medium rounded-lg transition-colors",
@@ -79,8 +81,12 @@ export function Header({ user }: HeaderProps) {
       {/* Logo o Título en móvil */}
       <span className="md:hidden text-lg font-bold text-blue-700">GTERP</span>
 
-      {/* 2. AQUÍ MOSTRAMOS EL USUARIO O EL BOTÓN DE SALIR */}
-      <div className="flex items-center gap-2">
+      {/* 2. AQUÍ MOSTRAMOS LA CAMPANA Y EL USUARIO */}
+      <div className="flex items-center gap-4"> {/* Cambié a gap-4 para darle un poco más de espacio */}
+        
+        {/* ✨ AQUÍ ENCHUFAMOS LA CAMPANA ✨ */}
+        <NotificationBell />
+
         {user ? (
             // Si hay usuario, mostramos el menú completo con avatar
             <UserNav user={user} />
