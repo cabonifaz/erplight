@@ -1,5 +1,5 @@
 import { auth } from "@/auth";
-import { getProductsList } from "@/actions/product-actions";
+import { getProducts } from "@/actions/product-actions";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -8,7 +8,7 @@ import { ProductActionsButton } from "./product-actions-button"; // Componente c
 
 export default async function ProductsPage() {
     const session = await auth();
-    const products = await getProductsList();
+   const products = await getProducts();
     
     // Verificamos permisos en el servidor para mostrar u ocultar el botón
     const userRole = session?.user?.role?.toUpperCase() || "";
