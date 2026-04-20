@@ -103,7 +103,7 @@ export async function validateExcelSales(payload: { data: any[], branchId: numbe
 }
 
 
-// --- 2. FUNCIÓN DE PROCESAMIENTO ---
+// --- 2. FUNCIÓN DE PROCESAMIENTO (VERSIÓN ULTRA RÁPIDA CON JSON) ---
 export async function processExcelSales(payload: { data: any[], branchId: number }) {
     const session = await auth();
     if (!session?.user?.id) return { success: false, message: "No autorizado" };
@@ -115,11 +115,10 @@ export async function processExcelSales(payload: { data: any[], branchId: number
     const connection = await pool.getConnection();
 
     try {
-        await connection.beginTransaction();
-
         const ventasAgrupadas = new Map();
+        const nombresUnicos = new Set<string>(); // Guardaremos los nombres para buscarlos de golpe
 
-        // --- BUCLE 1: Agrupar datos y sumar dinero por método de pago ---
+        // --- BUCLE 1: TU LÓGICA ORIGINAL (Se queda intacta) ---
         for (const fila of ventasData) {
             const findValue = (keywords: string[]) => {
                 const exactKey = Object.keys(fila).find(k => 
@@ -138,7 +137,6 @@ export async function processExcelSales(payload: { data: any[], branchId: number
             
             const precioVentaParsed = parsePrecio(rawPrecioVenta);
             const precioUnitarioParsed = parsePrecio(rawPrecioUnitario);
-            
             const valorFila = precioVentaParsed > 0 ? precioVentaParsed : (precioUnitarioParsed * cantidad);
             
             const metodo = findValue(['metodo de pago', 'método de pago']) || 'Efectivo';
@@ -208,6 +206,7 @@ export async function processExcelSales(payload: { data: any[], branchId: number
 
             if (nombreProducto) {
                 const productoYaExiste = grupo.detalles.find((d: any) => d.nombre === nombreProducto);
+                nombresUnicos.add(nombreProducto); // Guardamos para buscar su ID luego
                 
                 if (!productoYaExiste) {
                     grupo.detalles.push({ nombre: nombreProducto, cantidad: cantidad, valorTotal: valorFila });
@@ -218,58 +217,48 @@ export async function processExcelSales(payload: { data: any[], branchId: number
             }
         }
 
-        // --- BUCLE 2: Inserción en BD ---
-        for (const [key, data] of ventasAgrupadas.entries()) {
+        // --- BUCLE 2 OPTIMIZADO: Mapeo de IDs y Creación de JSON ---
+        await connection.beginTransaction();
+
+        // 2.1: Buscamos los IDs de los 5 o 10 productos una sola vez, en lugar de 1500 veces
+        const catalogo = new Map();
+        for (const nombre of Array.from(nombresUnicos)) {
+            const [itemResult]: any = await connection.query("CALL sp_buscar_item_venta(?)", [nombre]);
+            const itemRow = itemResult[0]?.[0];
+            if (!itemRow || itemRow.tipo === 'NONE') throw new Error(`El ítem "${nombre}" no existe.`);
+            catalogo.set(nombre, { id: itemRow.item_id, tipo: itemRow.tipo });
+        }
+
+        // 2.2: Construimos un Array plano con toda la información
+        const jsonFilas = [];
+        for (const [ticketId, data] of ventasAgrupadas.entries()) {
             const metodoPagoFinal = Array.from(data.metodos).join(" + ");
 
-            const [saleResult]: any = await connection.query(
-                "CALL sp_registrar_venta_cabecera(?, ?, ?, ?, ?, ?, ?)", 
-                [branchId, metodoPagoFinal, data.totalVenta, data.fecha, data.docType, data.ticketId, data.clientDoc]
-            );
-            const saleId = saleResult[0][0].sale_id;
-
-            for (const [nombreMetodo, montoMetodo] of Object.entries(data.desglosePagos)) {
-                await connection.query(
-                    "CALL sp_registrar_pago_detalle(?, ?, ?)", 
-                    [saleId, nombreMetodo, montoMetodo]
-                );
-            }
-
             for (const detalle of data.detalles) {
-                // ✨ NUEVO: Identificamos si es plato o bebida
-                const [itemResult]: any = await connection.query("CALL sp_buscar_item_venta(?)", [detalle.nombre]);
-                const itemRow = itemResult[0]?.[0];
-                
-                if (!itemRow || itemRow.tipo === 'NONE') throw new Error(`El ítem "${detalle.nombre}" no existe en el sistema.`);
-                
-                const menuId = itemRow.tipo === 'MENU' ? itemRow.item_id : null;
-                const productId = itemRow.tipo === 'PRODUCTO' ? itemRow.item_id : null;
-                const precioUnitarioReal = detalle.valorTotal / detalle.cantidad;
-
-                // ✨ Llamamos al nuevo SP que soporta los dos IDs
-                await connection.query("CALL sp_registrar_venta_detalle_v2(?, ?, ?, ?, ?)", 
-                [saleId, productId, menuId, detalle.cantidad, precioUnitarioReal]);
-
-                if (itemRow.tipo === 'MENU') {
-                    const [recetaResult]: any = await connection.query("CALL sp_obtener_receta_producto(?)", [itemRow.item_id]);
-                    const recetaRows = recetaResult[0];
-
-                    if (recetaRows && recetaRows.length > 0) {
-                        for (const ingrediente of recetaRows) {
-                            const cantidadADescontar = ingrediente.quantity * detalle.cantidad;
-                            await connection.query("CALL sp_registrar_ajuste_inventario(?, ?, 'Salida', ?, ?, ?)", [branchId, userId, ingrediente.component_id, cantidadADescontar, `Venta Ticket ${data.ticketId}`]);
-                        }
-                    }
-                } else if (itemRow.tipo === 'PRODUCTO') {
-                    // Si es venta directa, descuenta 1 a 1 de la tabla de insumos
-                    await connection.query("CALL sp_registrar_ajuste_inventario(?, ?, 'Salida', ?, ?, ?)", [branchId, userId, productId, detalle.cantidad, `Venta Ticket ${data.ticketId}`]);
-                }
+                const itemDb = catalogo.get(detalle.nombre);
+                jsonFilas.push({
+                    ticket_id: ticketId,
+                    fecha: data.fecha,
+                    doc_type: data.docType,
+                    client_doc: data.clientDoc,
+                    metodo_pago: metodoPagoFinal,
+                    total_cabecera: data.totalVenta,
+                    tipo_item: itemDb.tipo, // 'MENU' o 'PRODUCTO'
+                    item_id: itemDb.id,
+                    cantidad: detalle.cantidad,
+                    precio_uni: detalle.valorTotal / detalle.cantidad,
+                    subtotal: detalle.valorTotal
+                });
             }
         }
 
+        // 2.3: Mandamos los 1500 registros en 1 SOLA LLAMADA a la base de datos
+        const datosVentasJson = JSON.stringify(jsonFilas);
+        await connection.query("CALL sp_procesar_excel_masivo(?, ?, ?)", [branchId, userId, datosVentasJson]);
+
         await connection.commit();
         revalidatePath('/inventario'); 
-        return { success: true, message: "Excel procesado: Ventas ingresadas correctamente con la nueva arquitectura de menús e insumos." };
+        return { success: true, message: `Excel procesado en segundos: ${ventasData.length} registros ingresados correctamente.` };
 
     } catch (error: any) {
         await connection.rollback();

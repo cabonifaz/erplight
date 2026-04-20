@@ -559,7 +559,7 @@ export async function getRequestReceptions(requestId: number) {
 }
 
 // ==============================================================================
-// 5. GESTIÓN DE ORDEN DE COMPRA (SQL SEGURO RESTAURADO)
+// 5. GESTIÓN DE ORDEN DE COMPRA (SQL SEGURO RESTAURADO -> PURGADO A SPs)
 // ==============================================================================
 
 export async function createPurchaseOrderAction(data: any) {
@@ -567,36 +567,33 @@ export async function createPurchaseOrderAction(data: any) {
   try {
     await connection.beginTransaction();
 
-    const [result]: any = await connection.query(
-      `INSERT INTO orden_compra 
-      (solicitud_id, comprador_ruc, comprador_razon, comprador_direccion, solicitante,
-       proveedor_ruc, proveedor_razon_social, proveedor_direccion, proveedor_contacto,
-       fecha_emision, fecha_recepcion_esperada, lugar_entrega, condiciones_pago, condiciones_venta, 
-       garantias, incoterm, incluye_instalacion, moneda, tipo_cambio, incluye_igv,
-       tiene_detraccion, tipo_detraccion, porcentaje_detraccion, monto_detraccion, numero_cuenta_operacion, 
-       subtotal, total, estado)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'GENERADA')`,
+    // 1. Crear Cabecera y recuperar el ID
+    await connection.query("SET @new_id = 0");
+    await connection.query(
+      "CALL sp_crear_orden_cabecera(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, @new_id)",
       [
         data.requestId, data.comprador_ruc, data.comprador_razon, data.comprador_direccion, data.solicitante,
         data.proveedor_ruc, data.proveedor_razon, data.proveedor_direccion, data.proveedor_contacto,
         data.fecha_emision, data.fecha_entrega, data.lugar_entrega, data.forma_pago, data.condiciones_venta, 
         data.garantias, data.incoterm, data.incluye_instalacion ? 1 : 0, data.moneda, data.tipo_cambio, data.incluye_igv ? 1 : 0,
-        data.tiene_detraccion ? 1 : 0, data.tipo_detraccion, data.porcentaje_detraccion || 0, data.monto_detraccion || 0, data.numero_cuenta_operacion,
+        data.tiene_detraccion ? 1 : 0, data.tipo_detraccion, data.porcentaje_detraccion || 0, data.monto_detraccion || 0, data.numero_cuenta_operacion, 
         data.subtotal, data.total
       ]
     );
+    
+    const [rows]: any = await connection.query("SELECT @new_id as id");
+    const ordenId = rows[0]?.id;
+    
+    if (!ordenId) throw new Error("No se pudo obtener el ID de la orden generada.");
 
-    const ordenId = result.insertId;
-
+    // 2. Insertar Detalles
     for (const item of data.items) {
       await connection.query(
-        `INSERT INTO orden_compra_detalle (orden_compra_id, codigo, descripcion, cantidad, precio_unitario, precio_total) VALUES (?, ?, ?, ?, ?, ?)`,
+        "CALL sp_insertar_orden_detalle(?, ?, ?, ?, ?, ?)",
         [ordenId, item.codigo || '', item.descripcion || 'Item', item.cantidad, item.precio_unitario, item.cantidad * item.precio_unitario]
       );
     }
 
-    await connection.query("UPDATE purchase_requests SET orden_compra_id = ? WHERE id = ?", [ordenId, data.requestId]);
-    
     await connection.commit();
     revalidatePath("/compras/solicitudes"); 
     return { success: true, message: "Orden creada con éxito", ordenId };
@@ -609,24 +606,18 @@ export async function createPurchaseOrderAction(data: any) {
 
 export async function getPurchaseOrders(requestId: number) {
   try {
-    const [rows]: any = await pool.query(
-      "SELECT * FROM orden_compra WHERE solicitud_id = ? ORDER BY id ASC", 
-      [requestId]
-    );
+    const [rows]: any = await pool.query("CALL sp_listar_ordenes_solicitud(?)", [requestId]);
     
-    if (rows.length === 0) return [];
+    // Al usar SP, la data viene en el índice [0]
+    if (!rows[0] || rows[0].length === 0) return [];
     
-    // Mapeo seguro con SQL directo
-    const ordersList = await Promise.all(rows.map(async (orden: any) => {
-        const [items]: any = await pool.query(
-          "SELECT * FROM orden_compra_detalle WHERE orden_compra_id = ?", 
-          [orden.id]
-        );
+    const ordersList = await Promise.all(rows[0].map(async (orden: any) => {
+        const [items]: any = await pool.query("CALL sp_listar_detalles_orden(?)", [orden.id]);
         
         return { 
             ...orden, 
             proveedor_razon: orden.proveedor_razon_social,
-            items: items.map((i: any) => ({
+            items: items[0].map((i: any) => ({
                 ...i,
                 codigo: i.codigo || "" 
             }))
@@ -645,29 +636,26 @@ export async function updatePurchaseOrderAction(data: any) {
   try {
     await connection.beginTransaction();
 
+    // 1. Actualizar Cabecera (Pasamos el ordenId primero)
     await connection.query(
-      `UPDATE orden_compra SET 
-       comprador_ruc=?, comprador_razon=?, comprador_direccion=?, solicitante=?,
-       proveedor_ruc=?, proveedor_razon_social=?, proveedor_direccion=?, proveedor_contacto=?,
-       fecha_recepcion_esperada=?, lugar_entrega=?, condiciones_pago=?, condiciones_venta=?,
-       garantias=?, incoterm=?, incluye_instalacion=?, moneda=?, tipo_cambio=?, incluye_igv=?,
-       tiene_detraccion=?, tipo_detraccion=?, porcentaje_detraccion=?, monto_detraccion=?, numero_cuenta_operacion=?,
-       subtotal=?, total=? WHERE id=?`,
+      "CALL sp_actualizar_orden_cabecera(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       [
-        data.comprador_ruc, data.comprador_razon, data.comprador_direccion, data.solicitante,
+        data.ordenId, data.comprador_ruc, data.comprador_razon, data.comprador_direccion, data.solicitante,
         data.proveedor_ruc, data.proveedor_razon, data.proveedor_direccion, data.proveedor_contacto,
         data.fecha_entrega, data.lugar_entrega, data.forma_pago, data.condiciones_venta,
         data.garantias, data.incoterm, data.incluye_instalacion ? 1 : 0, data.moneda, data.tipo_cambio, data.incluye_igv ? 1 : 0,
         data.tiene_detraccion ? 1 : 0, data.tipo_detraccion, data.porcentaje_detraccion || 0, data.monto_detraccion || 0, data.numero_cuenta_operacion,
-        data.subtotal, data.total, data.ordenId
+        data.subtotal, data.total
       ]
     );
 
-    await connection.query("DELETE FROM orden_compra_detalle WHERE orden_compra_id = ?", [data.ordenId]);
+    // 2. Limpiar items antiguos
+    await connection.query("CALL sp_eliminar_detalles_orden(?)", [data.ordenId]);
     
+    // 3. Insertar items nuevos
     for (const item of data.items) {
       await connection.query(
-        `INSERT INTO orden_compra_detalle (orden_compra_id, codigo, descripcion, cantidad, precio_unitario, precio_total) VALUES (?, ?, ?, ?, ?, ?)`,
+        "CALL sp_insertar_orden_detalle(?, ?, ?, ?, ?, ?)",
         [data.ordenId, item.codigo || '', item.descripcion, item.cantidad, item.precio_unitario, item.cantidad * item.precio_unitario]
       );
     }
@@ -685,9 +673,8 @@ export async function deletePurchaseOrderAction(ordenId: number) {
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
-    await connection.query("DELETE FROM orden_compra_detalle WHERE orden_compra_id = ?", [ordenId]);
-    await connection.query("DELETE FROM orden_compra WHERE id = ?", [ordenId]);
-    await connection.query("UPDATE purchase_requests SET orden_compra_id = NULL WHERE orden_compra_id = ?", [ordenId]);
+    // El SP ya hace los 2 DELETE y el UPDATE internamente
+    await connection.query("CALL sp_eliminar_orden_completa(?)", [ordenId]);
     await connection.commit();
     
     revalidatePath("/compras/solicitudes");
@@ -698,53 +685,10 @@ export async function deletePurchaseOrderAction(ordenId: number) {
   } finally { connection.release(); }
 }
 
-export async function getProviderByRuc(ruc: string) {
-    try {
-        const [rows]: any = await pool.query("SELECT name, address FROM providers WHERE ruc = ? AND estado = 1 LIMIT 1", [ruc]);
-        return rows[0] || null;
-    } catch (error) { return null; }
-}
+// ==============================================================================
+// 6. REPORTES Y PREDICCIONES
+// ==============================================================================
 
-export async function getProductByCode(code: string) {
-    try {
-        const [rows]: any = await pool.query("SELECT name, unit_measure FROM products WHERE code = ? AND status = 1 LIMIT 1", [code]);
-        return rows[0] || null;
-    } catch (error) { return null; }
-}
-
-export async function searchProvidersAction(term: string) {
-  if (!term || term.length < 3) return [];
-  try {
-    const query = `SELECT id, ruc, name as razon_social, address as direccion FROM providers WHERE (ruc LIKE ? OR name LIKE ?) AND estado = 1 LIMIT 5`;
-    const [rows]: any = await pool.query(query, [`%${term}%`, `%${term}%`]);
-    return rows;
-  } catch (error) { return []; }
-}
-
-export async function getEmisorData(requestId: number) {
-    try {
-        const [rows]: any = await pool.query("CALL sp_obtener_datos_emisor_oc(?)", [requestId]);
-        // rows[0][0] contiene el primer registro del primer conjunto de resultados
-        return rows[0][0] || null;
-    } catch (error) {
-        console.error("Error al obtener emisor:", error);
-        return null;
-    }
-}
-
-// En purchase-actions.ts (Ejemplo de cómo debería quedar)
-export async function registerPurchaseInvoice(formData: FormData) {
-    const totalAmount = formData.get("total_amount");
-    // ... tu lógica de validación
-    
-    // Al ejecutar el procedimiento almacenado, agrega el nuevo parámetro
-    await pool.query("CALL sp_registrar_factura_compra(?, ?, ?, ...)", [
-        // ... otros campos
-        totalAmount, 
-    ]);
-}
-
-// OBTENER REPORTE HISTÓRICO DE COMPRAS
 export async function obtenerReporteCompras(branchId: number, fechaInicio: string, fechaFin: string) {
     const connection = await pool.getConnection();
     try {
@@ -758,7 +702,6 @@ export async function obtenerReporteCompras(branchId: number, fechaInicio: strin
     }
 }
 
-// OBTENER PREDICCIÓN INTELIGENTE DE ABASTECIMIENTO
 export async function obtenerPrediccionCompras(branchId: number) {
     const connection = await pool.getConnection();
     try {
@@ -769,5 +712,25 @@ export async function obtenerPrediccionCompras(branchId: number) {
         return { success: false, data: [] };
     } finally {
         connection.release();
+    }
+}
+
+// ==============================================================================
+// 7. BÚSQUEDA DE PROVEEDORES
+// ==============================================================================
+
+export async function searchProvidersAction(query: string) {
+    if (!query || query.trim() === "") return [];
+    
+    try {
+        // Busca en la tabla 'providers' por RUC o por Nombre
+        const [rows]: any = await pool.query(
+            "SELECT id, ruc, name, address, contact_name FROM providers WHERE ruc LIKE ? OR name LIKE ? LIMIT 10",
+            [`%${query}%`, `%${query}%`]
+        );
+        return rows;
+    } catch (error) {
+        console.error("Error buscando proveedores:", error);
+        return [];
     }
 }

@@ -264,7 +264,11 @@ export async function autogenerarHorarioSemana(branchId: number, fechaInicio: st
     const connection = await pool.getConnection();
     try {
         await connection.beginTransaction();
-        const [emps]: any = await connection.query("SELECT id FROM employees WHERE branch_id = ? AND estado = 1", [branchId]);
+        
+        // ✨ Reemplazo limpio con SP
+        const [empsResult]: any = await connection.query("CALL sp_listar_empleados_activos_sucursal(?)", [branchId]);
+        const emps = empsResult[0] || [];
+        
         const dInicio = new Date(fechaInicio + 'T00:00:00');
         const dFin = new Date(fechaFin + 'T00:00:00');
 

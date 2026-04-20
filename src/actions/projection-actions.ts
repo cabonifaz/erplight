@@ -1,22 +1,35 @@
 'use server'
 import { pool } from "@/lib/db";
 
-export async function generarProyeccion(branchId: number, targetDate: string, tipoVista: string) {
-    const connection = await pool.getConnection();
+// (Mantén tus imports de arriba intactos, especialmente el de tu base de datos)
+
+export async function generarProyeccion(branchId: number, fechaTarget: string, tipoVista: string) {
+    // 1. Obtenemos una conexión específica del pool
+    const connection = await pool.getConnection(); 
+    
     try {
-        // ✨ Añadimos el 3er parámetro (tipoVista: 'DIA' o 'MES')
-        const [results]: any = await connection.query("CALL sp_generar_proyeccion_completa(?, ?, ?)", [branchId, targetDate, tipoVista]);
-        
-        return { 
-            success: true, 
-            horas: results[0] || [], 
-            stock: results[1] || [],
-            menus: results[2] || [] // ✨ Devolvemos el reporte de Menús y Dinero
+        // 2. Usamos esa conexión
+        const [rows]: any = await connection.query(
+            'CALL sp_generar_proyecciones(?, ?, ?)', 
+            [branchId, fechaTarget, tipoVista]
+        );
+
+        return {
+            success: true,
+            menus: rows[0] || [],
+            horas: rows[1] || [],
+            stock: rows[2] || []
         };
-    } catch (error: any) {
-        console.error("Error generando proyecciones:", error);
-        return { success: false, message: error.message, horas: [], stock: [], menus: [] };
+        
+    } catch (error) {
+        console.error("❌ Error CRÍTICO en la Proyección:", error);
+        return { 
+            success: false, 
+            message: "Error interno al calcular proyecciones",
+            menus: [], horas: [], stock: [] 
+        };
     } finally {
-        connection.release();
+        // 3. ¡VITAL! Liberamos la conexión pase lo que pase
+        connection.release(); 
     }
 }

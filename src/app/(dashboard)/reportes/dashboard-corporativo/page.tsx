@@ -2,8 +2,7 @@
 
 import { useState } from "react";
 import { obtenerDashboardCorporativo } from "@/actions/dashboard-actions";
-// ✨ Cambiamos BarChart por PieChart aquí para evitar choques
-import { Building2, Clock, DollarSign, Receipt, TrendingUp, Utensils, PieChart } from "lucide-react";
+import { Building2, Clock, DollarSign, Receipt, Utensils, PieChart } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
 
 export default function DashboardCorporativoPage() {
@@ -26,64 +25,81 @@ export default function DashboardCorporativoPage() {
         const result = await obtenerDashboardCorporativo(fechaInicio, fechaFin);
         
         if (result.success) {
-            setKpis(result.kpis);
-            setRankingSedes(result.rankingSedes);
-            // Ordenamos los horarios cronológicamente para la gráfica
-            const horariosOrdenados = [...result.horarios].sort((a, b) => a.hora.localeCompare(b.hora));
+            setKpis(result.kpis || { total_operaciones: 0, total_ingresos: 0 });
+            setRankingSedes(Array.isArray(result.rankingSedes) ? result.rankingSedes : []);
+            
+            const safeHorarios = Array.isArray(result.horarios) ? result.horarios : [];
+            const horariosOrdenados = [...safeHorarios].sort((a, b) => Number(a.hora) - Number(b.hora));
+            
             setHorarios(horariosOrdenados);
-            setTopProductos(result.topProductos);
+            setTopProductos(Array.isArray(result.topProductos) ? result.topProductos : []);
         } else {
             alert(result.message);
         }
         setLoading(false);
     };
 
+    // ✨ 1. Función para dar formato a la moneda (con separador de miles)
+   const formatMoneda = (valor: any) => {
+        return new Intl.NumberFormat('es-PE', { style: 'currency', currency: 'PEN' }).format(Number(valor));
+    };
+
+    // ✨ 2. Función para convertir horas militares (14) a formato AM/PM (02:00 PM)
+   const formatHora = (hora: any) => {
+        const h = Number(hora);
+        if (h === 12) return '12:00 PM';
+        return h > 12 ? `${h - 12}:00 PM` : `${h}:00 AM`;
+    };
+
+    // ✨ 3. Filtramos las sedes para quitar las que están en CERO
+    const sedesActivas = rankingSedes.filter(sede => Number(sede.total_vendido) > 0);
+
     return (
-        <div className="p-6 w-full max-w-7xl mx-auto space-y-6">
-            <div className="border-b pb-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="p-6 w-full max-w-7xl mx-auto space-y-6 bg-slate-50 min-h-screen">
+            <div className="border-b border-gray-200 pb-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-                        <PieChart className="text-blue-700" />
+                        <PieChart className="text-blue-700" /> Dashboard Corporativo
                     </h1>
-                    <p className="text-gray-600">Rendimiento global, comparación de sedes y análisis de ventas de toda la cadena.</p>
+                    <p className="text-gray-600">Rendimiento global, comparación de sedes y análisis de ventas.</p>
                 </div>
-                <div className="bg-blue-50 text-blue-800 px-4 py-2 rounded-md font-semibold text-sm border border-blue-200">
+                <div className="bg-white text-blue-800 px-4 py-2 rounded-md font-semibold text-sm border border-blue-200 shadow-sm">
                     Vista General Consolidada
                 </div>
             </div>
 
             {/* CONTROLES */}
-            <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex flex-col md:flex-row gap-4 items-end">
+            <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 flex flex-col md:flex-row gap-4 items-end">
                 <div className="flex-1">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Fecha de Inicio</label>
-                    <input type="date" value={fechaInicio} onChange={(e) => setFechaInicio(e.target.value)} className="w-full border border-gray-300 rounded-md p-2" />
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Fecha de Inicio</label>
+                    <input type="date" value={fechaInicio} onChange={(e) => setFechaInicio(e.target.value)} className="w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 outline-none" />
                 </div>
                 <div className="flex-1">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Fecha de Fin</label>
-                    <input type="date" value={fechaFin} onChange={(e) => setFechaFin(e.target.value)} className="w-full border border-gray-300 rounded-md p-2" />
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Fecha de Fin</label>
+                    <input type="date" value={fechaFin} onChange={(e) => setFechaFin(e.target.value)} className="w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 outline-none" />
                 </div>
-                <button onClick={handleGenerar} disabled={loading || !fechaInicio || !fechaFin} className="bg-blue-700 text-white px-8 py-2 rounded-md hover:bg-blue-800 font-medium disabled:opacity-50 transition-colors">
+                <button onClick={handleGenerar} disabled={loading || !fechaInicio || !fechaFin} className="bg-blue-600 text-white px-8 py-2.5 rounded-lg hover:bg-blue-700 font-bold disabled:opacity-50 transition-all shadow-md">
                     {loading ? "Analizando Cadena..." : "Generar Análisis"}
                 </button>
             </div>
 
             {hasSearched && (
-                <div className="space-y-6 animate-in fade-in duration-300">
+                <div className="space-y-6 animate-in fade-in duration-500">
                     
                     {/* KPIs SUPERIORES */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm flex items-center gap-4">
-                            <div className="p-4 bg-green-100 text-green-700 rounded-full"><DollarSign className="w-8 h-8" /></div>
+                        <div className="bg-white border border-gray-100 rounded-xl p-6 shadow-sm flex items-center gap-5 hover:shadow-md transition-shadow">
+                            <div className="p-4 bg-green-50 text-green-600 rounded-full ring-1 ring-green-100"><DollarSign className="w-8 h-8" /></div>
                             <div>
-                                <p className="text-sm font-medium text-gray-500 uppercase">Facturación Total Cadena</p>
-                                <p className="text-4xl font-bold text-gray-900">S/ {Number(kpis.total_ingresos).toFixed(2)}</p>
+                                <p className="text-sm font-bold text-gray-400 uppercase tracking-wider">Facturación Total Cadena</p>
+                                <p className="text-4xl font-extrabold text-gray-800">{formatMoneda(kpis.total_ingresos)}</p>
                             </div>
                         </div>
-                        <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm flex items-center gap-4">
-                            <div className="p-4 bg-blue-100 text-blue-700 rounded-full"><Receipt className="w-8 h-8" /></div>
+                        <div className="bg-white border border-gray-100 rounded-xl p-6 shadow-sm flex items-center gap-5 hover:shadow-md transition-shadow">
+                            <div className="p-4 bg-blue-50 text-blue-600 rounded-full ring-1 ring-blue-100"><Receipt className="w-8 h-8" /></div>
                             <div>
-                                <p className="text-sm font-medium text-gray-500 uppercase">Operaciones Totales (Tickets)</p>
-                                <p className="text-4xl font-bold text-gray-900">{kpis.total_operaciones}</p>
+                                <p className="text-sm font-bold text-gray-400 uppercase tracking-wider">Operaciones (Tickets)</p>
+                                <p className="text-4xl font-extrabold text-gray-800">{new Intl.NumberFormat('es-PE').format(kpis.total_operaciones)}</p>
                             </div>
                         </div>
                     </div>
@@ -91,37 +107,37 @@ export default function DashboardCorporativoPage() {
                     {/* GRÁFICAS DE RENDIMIENTO */}
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                         
-                        {/* 1. RANKING DE SEDES (¿Cuál vendió más?) */}
-                        <div className="bg-white border border-gray-200 rounded-lg p-5 shadow-sm">
-                            <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
-                                <Building2 className="text-indigo-600 w-5 h-5" /> Ranking de Ventas por Sede
+                        {/* 1. RANKING DE SEDES (Filtrado) */}
+                        <div className="bg-white border border-gray-100 rounded-xl p-6 shadow-sm">
+                            <h2 className="text-lg font-bold text-gray-800 mb-6 flex items-center gap-2">
+                                <Building2 className="text-indigo-500 w-5 h-5" /> Ranking de Ventas por Sede
                             </h2>
-                            <div className="h-[300px] w-full">
+                            <div className="h-[320px] w-full">
                                 <ResponsiveContainer width="100%" height="100%">
-                                    <BarChart data={rankingSedes} layout="vertical" margin={{ top: 5, right: 30, left: 40, bottom: 5 }}>
-                                        <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                                        <XAxis type="number" tickFormatter={(val) => `S/${val}`} />
-                                        <YAxis dataKey="sucursal" type="category" width={120} tick={{fontSize: 12}} />
-                                        <RechartsTooltip cursor={{fill: '#f3f4f6'}} formatter={(value: any) => [`S/ ${Number(value).toFixed(2)}`, 'Ventas']} />
-                                        <Bar dataKey="total_vendido" fill="#4f46e5" radius={[0, 4, 4, 0]} name="Ingresos Totales" />
+                                    <BarChart data={sedesActivas} layout="vertical" margin={{ top: 0, right: 30, left: 20, bottom: 0 }}>
+                                        <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e5e7eb" />
+                                        <XAxis type="number" tickFormatter={(val) => `S/${val/1000}k`} stroke="#9ca3af" />
+                                        <YAxis dataKey="sucursal" type="category" width={110} tick={{fontSize: 12, fill: '#4b5563', fontWeight: 600}} />
+                                        <RechartsTooltip cursor={{fill: '#f3f4f6'}} formatter={(value: any) => [formatMoneda(value), 'Ingresos']} />
+                                        <Bar dataKey="total_vendido" fill="#6366f1" radius={[0, 4, 4, 0]} barSize={35} />
                                     </BarChart>
                                 </ResponsiveContainer>
                             </div>
                         </div>
 
-                        {/* 2. PICOS DE HORARIO GLOBAL (¿En qué horario se vendió más?) */}
-                        <div className="bg-white border border-gray-200 rounded-lg p-5 shadow-sm">
-                            <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
-                                <Clock className="text-orange-500 w-5 h-5" /> Picos de Horario (Cadena Completa)
+                        {/* 2. PICOS DE HORARIO GLOBAL (Formateado) */}
+                        <div className="bg-white border border-gray-100 rounded-xl p-6 shadow-sm">
+                            <h2 className="text-lg font-bold text-gray-800 mb-6 flex items-center gap-2">
+                                <Clock className="text-orange-500 w-5 h-5" /> Demanda por Horario
                             </h2>
-                            <div className="h-[300px] w-full">
+                            <div className="h-[320px] w-full">
                                 <ResponsiveContainer width="100%" height="100%">
-                                    <BarChart data={horarios} margin={{ top: 20, right: 30, left: 0, bottom: 5 }}>
-                                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                                        <XAxis dataKey="hora" />
-                                        <YAxis />
-                                        <RechartsTooltip cursor={{fill: '#f3f4f6'}} formatter={(value: any) => [`S/ ${Number(value).toFixed(2)}`, 'Ventas']} />
-                                        <Bar dataKey="ingresos" fill="#f97316" radius={[4, 4, 0, 0]} name="Ingresos por Hora" />
+                                    <BarChart data={horarios} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                                        <XAxis dataKey="hora" tickFormatter={formatHora} tick={{fontSize: 11, fill: '#6b7280'}} />
+                                        <YAxis tickFormatter={(val) => `S/${val/1000}k`} tick={{fontSize: 12, fill: '#9ca3af'}}/>
+                                        <RechartsTooltip cursor={{fill: '#f3f4f6'}} labelFormatter={formatHora} formatter={(value: any) => [formatMoneda(value), 'Facturación']} />
+                                        <Bar dataKey="ingresos" fill="#f97316" radius={[4, 4, 0, 0]} />
                                     </BarChart>
                                 </ResponsiveContainer>
                             </div>
@@ -129,30 +145,53 @@ export default function DashboardCorporativoPage() {
 
                     </div>
 
-                    {/* 3. TOP PRODUCTOS GLOBAL (¿Qué producto se vendió más?) */}
-                    <div className="bg-white border border-gray-200 rounded-lg p-5 shadow-sm">
+                    {/* 3. TOP PRODUCTOS GLOBAL (Mejorado) */}
+                    <div className="bg-white border border-gray-100 rounded-xl p-6 shadow-sm">
                         <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
-                            <Utensils className="text-green-600 w-5 h-5" /> Top 15 Productos Más Vendidos (Nivel Nacional)
+                            <Utensils className="text-green-500 w-5 h-5" /> Top Productos Más Rentables
                         </h2>
-                        <div className="overflow-x-auto rounded-md border">
+                        <div className="overflow-x-auto rounded-lg border border-gray-100">
                             <table className="min-w-full text-left text-sm">
-                                <thead className="bg-gray-50">
+                                <thead className="bg-gray-50 border-b border-gray-100">
                                     <tr>
-                                        <th className="p-3 font-semibold text-gray-700">Producto</th>
-                                        <th className="p-3 font-semibold text-gray-700 text-center">Unidades Vendidas</th>
-                                        <th className="p-3 font-semibold text-blue-700 text-right">Facturación Generada</th>
+                                        <th className="p-4 font-bold text-gray-600">Producto</th>
+                                        <th className="p-4 font-bold text-gray-600 text-center">Precio Prom.</th>
+                                        <th className="p-4 font-bold text-gray-600 text-center">Unidades</th>
+                                        <th className="p-4 font-bold text-blue-700 text-right">Facturación Generada</th>
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y divide-gray-100">
-                                    {topProductos.map((art, idx) => (
-                                        <tr key={idx} className="hover:bg-gray-50">
-                                            <td className="p-3 font-medium text-gray-800 flex items-center gap-2">
-                                                <span className="text-gray-400 font-bold text-xs w-4">{idx + 1}.</span> {art.producto}
-                                            </td>
-                                            <td className="p-3 text-center text-gray-600">{art.cantidad}</td>
-                                            <td className="p-3 text-right font-bold text-blue-600">S/ {Number(art.total_generado).toFixed(2)}</td>
+                                <tbody className="divide-y divide-gray-50">
+                                    {topProductos.map((art, idx) => {
+                                        // Calculamos el precio promedio para que tenga sentido el orden
+                                        const precioUnitario = Number(art.total_generado) / Number(art.cantidad);
+                                        
+                                        return (
+                                            <tr key={idx} className="hover:bg-blue-50/50 transition-colors">
+                                                <td className="p-4 font-semibold text-gray-800 flex items-center gap-3">
+                                                    <span className="flex items-center justify-center bg-gray-100 text-gray-500 rounded-md w-7 h-7 text-xs">
+                                                        {idx + 1}
+                                                    </span> 
+                                                    {art.producto}
+                                                </td>
+                                                <td className="p-4 text-center text-gray-500 font-medium">
+                                                    {formatMoneda(precioUnitario)}
+                                                </td>
+                                                <td className="p-4 text-center text-gray-600">
+                                                    <span className="bg-gray-100 px-3 py-1 rounded-full text-xs font-bold">
+                                                        {new Intl.NumberFormat('es-PE').format(art.cantidad)} und
+                                                    </span>
+                                                </td>
+                                                <td className="p-4 text-right font-extrabold text-blue-600">
+                                                    {formatMoneda(art.total_generado)}
+                                                </td>
+                                            </tr>
+                                        )
+                                    })}
+                                    {topProductos.length === 0 && (
+                                        <tr>
+                                            <td colSpan={4} className="p-8 text-center text-gray-500">No hay ventas registradas en este rango.</td>
                                         </tr>
-                                    ))}
+                                    )}
                                 </tbody>
                             </table>
                         </div>

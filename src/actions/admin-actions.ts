@@ -117,15 +117,13 @@ export async function createUser(selectedBranchIds: number[], formData: FormData
 }
 
 // ==========================================
-// 3. GESTIÓN DE LÍMITES DE APROBACIÓN
+// 3. GESTIÓN DE LÍMITES DE APROBACIÓN (CORREGIDO)
 // ==========================================
 
 export async function getApprovalLimits() {
     try {
-        const [rows]: any = await pool.query(
-            "SELECT code as user_id, num_1 as limit_amount FROM master_catalogs WHERE category = 'LIMITE_APROBACION' AND status = 1"
-        );
-        return rows;
+        const [rows]: any = await pool.query("CALL sp_listar_limites_aprobacion()");
+        return rows[0] || [];
     } catch (error) {
         console.error("Error obteniendo límites:", error);
         return [];
@@ -133,32 +131,14 @@ export async function getApprovalLimits() {
 }
 
 export async function saveApprovalLimit(userId: number, userName: string, limitAmount: string) {
-    const connection = await pool.getConnection();
     try {
-        // Buscamos si el usuario ya tiene un límite registrado
-        const [existing]: any = await connection.query(
-            "SELECT id FROM master_catalogs WHERE category = 'LIMITE_APROBACION' AND code = ?",
-            [userId.toString()]
+        await pool.query(
+            "CALL sp_guardar_limite_aprobacion(?, ?, ?)", 
+            [userId.toString(), userName, limitAmount]
         );
-
-        if (existing.length > 0) {
-            // Si ya existe, lo actualizamos
-            await connection.query(
-                "UPDATE master_catalogs SET num_1 = ? WHERE category = 'LIMITE_APROBACION' AND code = ?",
-                [limitAmount, userId.toString()]
-            );
-        } else {
-            // Si es nuevo, lo insertamos
-            await connection.query(
-                "INSERT INTO master_catalogs (category, code, description, num_1, status) VALUES ('LIMITE_APROBACION', ?, ?, ?, 1)",
-                [userId.toString(), `Límite de ${userName}`, limitAmount]
-            );
-        }
         revalidatePath("/dashboard/configuracion");
         return { success: true, message: "Límite guardado exitosamente" };
     } catch (error: any) {
-        return { success: false, message: error.message };
-    } finally {
-        connection.release();
+        return { success: false, message: error.sqlMessage || error.message };
     }
 }

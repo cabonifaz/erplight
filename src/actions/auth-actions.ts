@@ -13,18 +13,22 @@ export async function authenticate(prevState: string | undefined, formData: Form
     const email = formData.get('email') as string; 
     
     let rutaDestino = '/dashboard'; // Ruta por defecto para Gerentes, Admins, etc.
-
-    // ✨ 1. VERIFICAR EL ROL ANTES DEL LOGIN
+    
+// ✨ 1. VERIFICAR EL ROL ANTES DEL LOGIN
     if (email) {
         const connection = await pool.getConnection();
         try {
-            const [users]: any = await connection.query(
-                "SELECT role FROM users WHERE email = ? LIMIT 1", 
+            // Reemplazamos el SQL crudo por el Procedimiento Almacenado
+            const [results]: any = await connection.query(
+                "CALL sp_obtener_rol_usuario(?)", 
                 [email]
             );
             
+            // Extraemos el primer set de resultados que devuelve el SP
+            const users = results[0];
+            
             // Si el usuario existe y es el MARCADOR, cambiamos su destino
-            if (users.length > 0 && users[0].role === 'MARCADOR') {
+            if (users && users.length > 0 && users[0].role === 'MARCADOR') {
                 rutaDestino = '/marcador';
             }
         } catch (dbError) {

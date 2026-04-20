@@ -6,8 +6,8 @@ import { revalidatePath } from "next/cache";
 // 1. TRAER LOS PLATOS/COMBOS PARA EL DESPLEGABLE PRINCIPAL
 export async function obtenerMenusParaRecetas() {
   try {
-    const [rows]: any = await pool.query("SELECT id, name FROM menus WHERE status = 1 ORDER BY name ASC");
-    return rows;
+    const [rows]: any = await pool.query("CALL sp_listar_menus_activos()");
+    return rows[0] || [];
   } catch (error) {
     return [];
   }
