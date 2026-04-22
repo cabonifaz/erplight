@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react";
 import { obtenerCierreMensual } from "@/actions/cierre-mensual-actions";
-// IMPORTANTE: Asegúrate de tener esta función o una similar para listar sucursales
 import { getBranches } from "@/actions/admin-actions";
 import { DollarSign, Receipt, Calculator, CalendarDays, TrendingUp, CreditCard } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
@@ -24,14 +23,23 @@ export default function CierreMensualPage() {
     const [datosTurnos, setDatosTurnos] = useState<any[]>([]);
     const [kpis, setKpis] = useState({ total_operaciones: 0, total_dinero: 0, ticket_promedio: 0 });
 
-  // --- EFECTO INICIAL: CARGAR SUCURSALES ---
+    // ✨ FUNCIÓN PARA FORMATEAR MONEDA CON COMAS
+    const formatMoneda = (valor: any) => {
+        return new Intl.NumberFormat('en-US', { 
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2 
+        }).format(Number(valor) || 0);
+    };
+
+    // ✨ FUNCIONES DE LIMPIEZA DE TURNOS
+    const getShiftNameOnly = (val: any) => val ? String(val).replace(/^[0-9]+\.\s*/, '').split('(')[0].trim() : "";
+    const getShiftFullName = (val: any) => val ? String(val).replace(/^[0-9]+\.\s*/, '').trim() : "";
+
+    // --- EFECTO INICIAL: CARGAR SUCURSALES ---
     useEffect(() => {
         async function fetchSucursales() {
             try {
-                // Ahora usamos el nombre correcto y recibimos el arreglo directo
                 const result = await getBranches(); 
-                
-                // Si result es un arreglo y tiene datos, lo guardamos
                 if (Array.isArray(result) && result.length > 0) {
                     setSucursales(result);
                 } else {
@@ -55,10 +63,31 @@ export default function CierreMensualPage() {
         const result = await obtenerCierreMensual(Number(branchId), periodo);
         
         if (result.success) {
-            setDatosPagos(result.pagos);
-            setDatosArticulos(result.articulos);
-            setKpis(result.kpis);
-            setDatosTurnos(result.turnos);
+            setDatosPagos(result.pagos || []);
+            setDatosArticulos(result.articulos || []);
+            setKpis(result.kpis || { total_operaciones: 0, total_dinero: 0, ticket_promedio: 0 });
+
+            // ✨ RELLENO DE TURNOS PARA EL MENSUAL (Misma lógica que el Diario)
+            const turnosRecibidos = result.turnos || [];
+            const turnosEstandar = [
+                { id: '1. Mañana', nombreCompleto: '1. Mañana (06:00 - 12:00)' },
+                { id: '2. Tarde', nombreCompleto: '2. Tarde (12:00 - 18:00)' },
+                { id: '3. Noche', nombreCompleto: '3. Noche (18:00 - 23:59)' },
+                { id: '4. Madrugada', nombreCompleto: '4. Madrugada (00:00 - 05:59)' }
+            ];
+
+            const turnosCompletos = turnosEstandar.map(turnoBase => {
+                const turnoEncontrado = turnosRecibidos.find((t: any) => 
+                    String(t.rango_horas).includes(turnoBase.id)
+                );
+                return turnoEncontrado ? turnoEncontrado : {
+                    rango_horas: turnoBase.nombreCompleto,
+                    cantidad_operaciones: 0,
+                    total_generado: 0
+                };
+            });
+
+            setDatosTurnos(turnosCompletos);
         } else {
             alert(result.message);
         }
@@ -72,7 +101,7 @@ export default function CierreMensualPage() {
                     <CalendarDays className={branchId === "0" ? "text-purple-600" : "text-blue-600"} /> 
                     {branchId === "0" ? "Cierre Mensual Consolidado" : "Cierre Mensual por Sucursal"}
                 </h1>
-                <p className="text-gray-600">Resumen macro-financiero y rendimiento acumulado del mes.</p>
+                <p className="text-gray-600">Resumen macro-financiero y rendimiento acumulado del mes (Solo Días Cerrados).</p>
             </div>
 
             {/* CONTROLES */}
@@ -109,7 +138,7 @@ export default function CierreMensualPage() {
                 <button 
                     onClick={handleSearch} 
                     disabled={loading || !periodo || cargandoSedes} 
-                    className={`text-white px-8 py-2 rounded-md font-medium disabled:opacity-50 transition-colors ${branchId === "0" ? "bg-purple-600 hover:bg-purple-700" : "bg-blue-600 hover:bg-blue-700"}`}
+                    className={`text-white px-8 py-2 rounded-md font-medium disabled:opacity-50 transition-colors shadow-sm ${branchId === "0" ? "bg-purple-600 hover:bg-purple-700" : "bg-blue-600 hover:bg-blue-700"}`}
                 >
                     {loading ? "Procesando Mes..." : "Generar Cierre Mensual"}
                 </button>
@@ -125,7 +154,7 @@ export default function CierreMensualPage() {
                             <div className="p-4 bg-green-100 text-green-700 rounded-full"><DollarSign className="w-8 h-8" /></div>
                             <div>
                                 <p className="text-sm font-medium text-gray-500 uppercase">Ingresos del Mes</p>
-                                <p className="text-3xl font-bold text-gray-900">S/ {Number(kpis.total_dinero).toFixed(2)}</p>
+                                <p className="text-3xl font-bold text-gray-900">S/ {formatMoneda(kpis.total_dinero)}</p>
                             </div>
                         </div>
                         <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm flex items-center gap-4">
@@ -139,7 +168,7 @@ export default function CierreMensualPage() {
                             <div className="p-4 bg-purple-100 text-purple-700 rounded-full"><Calculator className="w-8 h-8" /></div>
                             <div>
                                 <p className="text-sm font-medium text-gray-500 uppercase">Ticket Promedio</p>
-                                <p className="text-3xl font-bold text-gray-900">S/ {Number(kpis.ticket_promedio).toFixed(2)}</p>
+                                <p className="text-3xl font-bold text-gray-900">S/ {formatMoneda(kpis.ticket_promedio)}</p>
                             </div>
                         </div>
                     </div>
@@ -151,12 +180,18 @@ export default function CierreMensualPage() {
                                 <TrendingUp className="text-orange-500 w-5 h-5" /> Ingresos por Franja Horaria (Mensual)
                             </h2>
                             <div className="h-[300px] w-full">
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <BarChart data={datosTurnos} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-                                        <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                                        <XAxis type="number" tickFormatter={(val) => `S/${val}`} />
-                                        <YAxis dataKey="rango_horas" type="category" width={150} tick={{fontSize: 12}} />
-                                        <RechartsTooltip formatter={(value: any) => [`S/ ${Number(value).toFixed(2)}`, 'Generado']} />
+                                <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
+                                    <BarChart data={datosTurnos} layout="vertical" margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
+                                        <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e5e7eb" />
+                                        <XAxis type="number" tickFormatter={(val) => `S/ ${formatMoneda(val)}`} stroke="#6b7280" />
+                                        {/* ✨ Aplicamos la nueva función limpiadora para el Eje Y */}
+                                        <YAxis dataKey="rango_horas" type="category" width={90} tick={{fontSize: 12}} tickFormatter={getShiftNameOnly} stroke="#6b7280" />
+                                        <RechartsTooltip 
+                                            cursor={{fill: '#f3f4f6'}}
+                                            contentStyle={{borderRadius: '8px', border: '1px solid #e5e7eb'}}
+                                            formatter={(value: any) => [`S/ ${formatMoneda(value)}`, 'Generado']} 
+                                            labelFormatter={getShiftFullName}
+                                        />
                                         <Bar dataKey="total_generado" fill="#f97316" radius={[0, 4, 4, 0]} />
                                     </BarChart>
                                 </ResponsiveContainer>
@@ -183,7 +218,7 @@ export default function CierreMensualPage() {
                                                 <tr key={idx} className="hover:bg-gray-50">
                                                     <td className="p-3 font-medium uppercase text-gray-800">{pago.metodo_pago}</td>
                                                     <td className="p-3 text-center text-gray-600">{pago.cantidad_transacciones}</td>
-                                                    <td className="p-3 text-right font-bold text-gray-800">S/ {Number(pago.total_recaudado).toFixed(2)}</td>
+                                                    <td className="p-3 text-right font-bold text-gray-800">S/ {formatMoneda(pago.total_recaudado)}</td>
                                                 </tr>
                                             ))
                                         ) : (
@@ -198,9 +233,9 @@ export default function CierreMensualPage() {
                     {/* TOP PLATILLOS DEL MES */}
                     <div className="bg-white border border-gray-200 rounded-lg p-5 shadow-sm">
                         <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">Top Platillos del Mes</h2>
-                        <div className="overflow-x-auto rounded-md border">
-                            <table className="min-w-full text-left text-sm">
-                                <thead className="bg-gray-50">
+                        <div className="overflow-x-auto rounded-md border max-h-[400px] overflow-y-auto">
+                            <table className="min-w-full text-left text-sm whitespace-nowrap">
+                                <thead className="bg-gray-50 sticky top-0">
                                     <tr>
                                         <th className="p-3 font-semibold text-gray-700">Producto</th>
                                         <th className="p-3 font-semibold text-gray-700 text-center">Unidades Vendidas</th>
@@ -211,13 +246,13 @@ export default function CierreMensualPage() {
                                     {datosArticulos.length > 0 ? (
                                         datosArticulos.map((art, idx) => (
                                             <tr key={idx} className="hover:bg-gray-50">
-                                                <td className="p-3 font-medium text-gray-800">{art.articulo}</td>
-                                                <td className="p-3 text-center text-gray-600">{art.cantidad_vendida}</td>
-                                                <td className="p-3 text-right font-bold text-blue-600">S/ {Number(art.total_generado).toFixed(2)}</td>
+                                                <td className="p-3 font-medium text-gray-800">{art.producto}</td>
+                                                <td className="p-3 text-center text-gray-600">{art.unidades_vendidas}</td>
+                                                <td className="p-3 text-right font-bold text-blue-600">S/ {formatMoneda(art.facturacion_total)}</td>
                                             </tr>
                                         ))
                                     ) : (
-                                        <tr><td colSpan={3} className="p-4 text-center text-gray-500">No hay platillos registrados</td></tr>
+                                        <tr><td colSpan={3} className="p-8 text-center text-gray-500">No hay platillos registrados en los días cerrados</td></tr>
                                     )}
                                 </tbody>
                             </table>

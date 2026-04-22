@@ -3,7 +3,6 @@
 import { pool } from "@/lib/db";
 import { auth } from "@/auth";
 import { revalidatePath } from "next/cache";
-
 // --- 1. FUNCIÓN DE VALIDACIÓN ---
 export async function validateExcelSales(payload: { data: any[], branchId: number }) {
     const session = await auth();
@@ -17,6 +16,51 @@ export async function validateExcelSales(payload: { data: any[], branchId: numbe
     const connection = await pool.getConnection();
 
     try {
+        // ✨ EXTRAEMOS FECHAS Y TICKETS DEL EXCEL
+        const fechasEnExcel = [...new Set(ventasData.map(fila => {
+            const fechaRaw = fila['Fecha'];
+            if (!fechaRaw) return null;
+            // Extrae solo la parte de la fecha (Ej: de "01/11/2025 09:28" saca "01/11/2025")
+            return String(fechaRaw).split(' ')[0]; 
+        }).filter(Boolean))];
+
+        const ticketsEnExcel = [...new Set(ventasData.map(fila => 
+            fila['Serie y correlativo'] || fila['Serie y Correlativo']
+        ).filter(Boolean))];
+
+        // ✨ REGLA 1: VALIDACIÓN DE CIERRE DIARIO (BLOQUEO ESTRICTO)
+        if (fechasEnExcel.length > 0) {
+            const fechasJSON = JSON.stringify(fechasEnExcel);
+            const [cierreResult]: any = await connection.query("CALL sp_verificar_cierres_diarios(?, ?)", [branchId, fechasJSON]);
+            const cierresChocando = cierreResult[0];
+
+            if (cierresChocando && cierresChocando.length > 0) {
+                issues.push({ 
+                    producto: "🚫 DÍA CERRADO", 
+                    mensaje: `El Excel contiene ventas de un día que ya tiene el CIERRE DIARIO ENVIADO. No se permiten cargar modificaciones ni ventas nuevas para fechas cerradas.`, 
+                    tipo: 'error' 
+                });
+                return { success: true, issues, canProceed: false }; // Bloqueamos la ejecución
+            }
+        }
+
+        // ✨ REGLA 2: VALIDACIÓN DE DUPLICADOS (ADVERTENCIA / CORRECCIÓN)
+        if (ticketsEnExcel.length > 0) {
+            const ticketsJSON = JSON.stringify(ticketsEnExcel);
+            const [spResult]: any = await connection.query("CALL sp_verificar_tickets_duplicados(?, ?)", [branchId, ticketsJSON]);
+            const duplicados = spResult[0]; 
+
+            if (duplicados && duplicados.length > 0) {
+                const ejemplos = duplicados.map((d: any) => d.document_number).slice(0, 5).join(", ");
+                issues.push({ 
+                    producto: "⚠️ CORRECCIÓN DE VENTAS", 
+                    mensaje: `Se detectaron boletas existentes (Ej: ${ejemplos}...). Se realizará una corrección automática: el inventario anterior se devolverá y se reemplazarán con los datos de este nuevo Excel.`, 
+                    tipo: 'warning' // NOTA: Es warning. Dejamos que 'canProceed' siga siendo true
+                });
+            }
+        }
+
+        // --- CÓDIGO DE AGRUPACIÓN Y VALIDACIÓN DE INVENTARIO (INTACTO) ---
         const ventasAgrupadas = new Map();
         const productosTotalesReales: Record<string, number> = {};
 
@@ -40,7 +84,6 @@ export async function validateExcelSales(payload: { data: any[], branchId: numbe
         }
 
         for (const [nombreItem, cantidadRequerida] of Object.entries(productosTotalesReales)) {
-            // ✨ NUEVO: Usamos el buscador inteligente universal
             const [itemResult]: any = await connection.query("CALL sp_buscar_item_venta(?)", [nombreItem]);
             const itemRow = itemResult[0]?.[0];
 
@@ -52,9 +95,7 @@ export async function validateExcelSales(payload: { data: any[], branchId: numbe
 
             const itemId = itemRow.item_id;
 
-            // Si es un MENÚ, verificamos su receta. Si es un PRODUCTO directo (ej. Gaseosa), verificamos su stock directo.
             if (itemRow.tipo === 'MENU') {
-                // Nota: Asegúrate de que sp_obtener_receta_producto funcione también con los IDs de los menús
                const [recetaResult]: any = await connection.query("CALL sp_obtener_receta_menu(?)", [itemId]);
                 const recetaRows = recetaResult[0];
 
@@ -78,7 +119,6 @@ export async function validateExcelSales(payload: { data: any[], branchId: numbe
                     }
                 }
             } else if (itemRow.tipo === 'PRODUCTO') {
-                // Validación para productos de venta directa
                 const [stockResult]: any = await connection.query("CALL sp_obtener_stock_actual(?, ?)", [itemId, branchId]);
                 const stockRow = stockResult[0];
                 const stockActual = stockRow.length > 0 ? Number(Object.values(stockRow[0])[0]) : 0;
@@ -288,6 +328,40 @@ export async function getReporteVentas(filtros: {
     } catch (error: any) {
         console.error("Error obteniendo reporte:", error);
         return { success: false, message: error.message, data: [] };
+    } finally {
+        connection.release();
+    }
+}
+
+// En src/actions/sale-actions.ts
+
+export async function obtenerHistorialCargas() {
+    const connection = await pool.getConnection();
+    try {
+        const [rows]: any = await connection.query("CALL sp_obtener_historial_cargas()");
+        return { success: true, data: rows[0] || [] };
+    } catch (error: any) {
+        console.error("Error obteniendo historial:", error);
+        return { success: false, message: error.message };
+    } finally {
+        connection.release();
+    }
+}
+
+// Agrégalo en tu archivo de acciones (ej. src/actions/sale-actions.ts)
+export async function obtenerLimiteDiasReporte() {
+    const connection = await pool.getConnection();
+    try {
+        // Llamada limpia al SP
+        const [rows]: any = await connection.query("CALL sp_obtener_configuracion_numerica('MAX_DIAS_REPORTE')");
+        
+        // Si por alguna razón borran el registro, por defecto será 31
+        const limite = rows[0][0]?.valor || 31; 
+        
+        return { success: true, maxDias: limite };
+    } catch (error: any) {
+        console.error("Error obteniendo configuración:", error);
+        return { success: false, maxDias: 31 };
     } finally {
         connection.release();
     }

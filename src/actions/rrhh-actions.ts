@@ -361,3 +361,24 @@ export async function obtenerReporteHoras(branchId: number, fechaInicio: string,
         connection.release();
     }
 }
+
+export async function obtenerNotificacionesGenerales(userId: number) {
+    const connection = await pool.getConnection();
+    try {
+        // Traemos las notificaciones no leídas de este usuario (máximo 10 para no saturar)
+        const [rows]: any = await connection.query(
+            `SELECT id, title, message, created_at 
+             FROM notifications 
+             WHERE user_id = ? AND is_read = 0 
+             ORDER BY created_at DESC 
+             LIMIT 10`, 
+            [userId]
+        );
+        return { success: true, data: rows };
+    } catch (error: any) {
+        console.error("Error trayendo notificaciones:", error);
+        return { success: false, data: [] };
+    } finally {
+        connection.release();
+    }
+}

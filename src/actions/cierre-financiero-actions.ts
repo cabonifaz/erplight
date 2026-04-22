@@ -1,6 +1,7 @@
 'use server'
 
 import { pool } from "@/lib/db";
+import { auth } from "@/auth";   // Ajusta tu ruta de autenticación
 
 export async function obtenerResumenVentasDiarias(branchId: number, fecha: string) {
     const connection = await pool.getConnection();
@@ -27,6 +28,39 @@ export async function obtenerResumenVentasDiarias(branchId: number, fecha: strin
         };
     } catch (error: any) {
         return { success: false, message: error.message };
+    } finally {
+        connection.release();
+    }
+}
+
+
+// Verifica si el candado está puesto
+export async function verificarEstadoCierre(branchId: number, fecha: string) {
+    const connection = await pool.getConnection();
+    try {
+        const [rows]: any = await connection.query("CALL sp_verificar_estado_cierre(?, ?)", [branchId, fecha]);
+        const isClosed = rows[0] && rows[0].length > 0 && rows[0][0].status === 1;
+        return { success: true, isClosed };
+    } catch (error: any) {
+        return { success: false, isClosed: false };
+    } finally {
+        connection.release();
+    }
+}
+
+// Ejecuta el cierre definitivo
+export async function enviarCierreDiario(branchId: number, fecha: string) {
+    const session = await auth();
+    if (!session?.user?.id) return { success: false, message: "No autorizado" };
+
+    const connection = await pool.getConnection();
+    try {
+        const [rows]: any = await connection.query("CALL sp_enviar_cierre_diario(?, ?, ?)", [branchId, fecha, session.user.id]);
+        const result = rows[0][0];
+        
+        return { success: result.success === 1, message: result.message };
+    } catch (error: any) {
+        return { success: false, message: "Error al enviar cierre: " + error.message };
     } finally {
         connection.release();
     }

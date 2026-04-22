@@ -2,12 +2,11 @@
 
 import { useState } from "react";
 import { getCierreInventario } from "@/actions/report-actions";
-import { obtenerResumenVentasDiarias } from "@/actions/cierre-financiero-actions";
+import { obtenerResumenVentasDiarias, verificarEstadoCierre, enviarCierreDiario } from "@/actions/cierre-financiero-actions";
 import { 
     AlertTriangle, TrendingUp, TrendingDown, PackageSearch, Search, 
-    Package, DollarSign, Receipt, CreditCard, Calculator, Clock, ChevronDown, ChevronUp
+    Package, DollarSign, Receipt, CreditCard, Calculator, Clock, ChevronDown, ChevronUp, Lock, Send, CheckCircle
 } from "lucide-react";
-// ✨ IMPORTAMOS RECHARTS
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Cell } from 'recharts';
 
 export default function CierreClient({ sucursales }: { sucursales: any[] }) {
@@ -16,15 +15,27 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
     const [loading, setLoading] = useState(false);
     const [hasSearched, setHasSearched] = useState(false);
 
+    // ✨ ESTADOS DE BLOQUEO DE CIERRE
+    const [isClosed, setIsClosed] = useState(false);
+    const [isSending, setIsSending] = useState(false);
+
     const [datos, setDatos] = useState<any[]>([]);
     const [datosPagos, setDatosPagos] = useState<any[]>([]);
     const [datosArticulos, setDatosArticulos] = useState<any[]>([]);
     const [datosTurnos, setDatosTurnos] = useState<any[]>([]);
-    const [detallesTurnos, setDetallesTurnos] = useState<any[]>([]); // Estado para el detalle de productos
-    const [turnoSeleccionado, setTurnoSeleccionado] = useState<string | null>(null); // Estado para abrir/cerrar detalles
+    const [detallesTurnos, setDetallesTurnos] = useState<any[]>([]); 
+    const [turnoSeleccionado, setTurnoSeleccionado] = useState<string | null>(null); 
 
     const [kpis, setKpis] = useState({ total_operaciones: 0, total_dinero: 0, ticket_promedio: 0 });
     const [pestañaActiva, setPestañaActiva] = useState("inventario");
+
+    // ✨ FUNCIÓN PARA FORMATEAR MONEDA CON COMAS
+    const formatMoneda = (valor: any) => {
+        return new Intl.NumberFormat('en-US', { 
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2 
+        }).format(Number(valor) || 0);
+    };
 
     const totalDineroPagos = datosPagos.reduce((sum, item) => sum + Number(item.total_recaudado), 0);
     const totalTickets = datosPagos.reduce((sum, item) => sum + Number(item.cantidad_transacciones), 0);
@@ -35,9 +46,13 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
         if (!branchId || !fecha) return;
         setLoading(true);
         setHasSearched(true);
-        setTurnoSeleccionado(null); // Reseteamos la vista de detalle al buscar
+        setTurnoSeleccionado(null); 
         
         try {
+            // ✨ CONSULTAMOS EL ESTADO DEL CANDADO
+            const estadoRes = await verificarEstadoCierre(Number(branchId), fecha);
+            setIsClosed(estadoRes.isClosed);
+
             const [resultInventario, resultFinanzas] = await Promise.all([
                 getCierreInventario({ branchId: Number(branchId), fechaInicio: fecha, fechaFin: fecha }),
                 obtenerResumenVentasDiarias(Number(branchId), fecha)
@@ -50,8 +65,35 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
                 setDatosPagos(resultFinanzas.pagos);
                 setDatosArticulos(resultFinanzas.articulos);
                 setKpis(resultFinanzas.kpis); 
-                setDatosTurnos(resultFinanzas.turnos || []);
-                setDetallesTurnos(resultFinanzas.detallesTurnos || []); // ✨ Guardamos los detalles
+                
+                const turnosRecibidos = resultFinanzas.turnos || [];
+                
+                const turnosEstandar = [
+                    { id: '1. Mañana', nombreCompleto: '1. Mañana (06:00 - 12:00)' },
+                    { id: '2. Tarde', nombreCompleto: '2. Tarde (12:00 - 18:00)' },
+                    { id: '3. Noche', nombreCompleto: '3. Noche (18:00 - 23:59)' },
+                    { id: '4. Madrugada', nombreCompleto: '4. Madrugada (00:00 - 05:59)' }
+                ];
+
+                const turnosCompletos = turnosEstandar.map(turnoBase => {
+                    const turnoEncontrado = turnosRecibidos.find((t: any) => 
+                        String(t.rango_horas).includes(turnoBase.id)
+                    );
+
+                    if (turnoEncontrado) {
+                        return turnoEncontrado;
+                    } else {
+                        return {
+                            rango_horas: turnoBase.nombreCompleto,
+                            cantidad_operaciones: 0,
+                            total_generado: 0
+                        };
+                    }
+                });
+
+                setDatosTurnos(turnosCompletos);
+                setDetallesTurnos(resultFinanzas.detallesTurnos || []); 
+
             } else {
                 alert("ERROR EN BASE DE DATOS (Finanzas):\n" + resultFinanzas.message);
                 setDatosPagos([]); setDatosArticulos([]); setDatosTurnos([]); setDetallesTurnos([]);
@@ -63,15 +105,34 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
         }
     };
 
-    // Colores para la gráfica
-    const COLORS = ['#3b82f6', '#f97316', '#22c55e', '#a855f7', '#64748b'];
+    // ✨ FUNCIÓN PARA ENVIAR Y BLOQUEAR EL DÍA
+    const handleEnviarCierre = async () => {
+        if (!confirm("⚠️ ¿Estás seguro de enviar el Cierre Diario?\n\nEsta acción es IRREVERSIBLE. Una vez enviado, no se podrán modificar, agregar ni eliminar ventas, compras o ajustes de almacén para esta fecha.")) {
+            return;
+        }
+        
+        setIsSending(true);
+        const res = await enviarCierreDiario(Number(branchId), fecha);
+        
+        if (res.success) {
+            setIsClosed(true); // Bloqueamos la interfaz
+            alert("✅ " + res.message);
+        } else {
+            alert("❌ Error: " + res.message);
+        }
+        setIsSending(false);
+    };
 
-    // Función para manejar el clic en "Ver Detalle"
+    const COLORS = ['#3b82f6', '#f97316', '#8b5cf6', '#10b981', '#ef4444', '#64748b'];
+
+    const getShiftNameOnly = (val: any) => val ? String(val).replace(/^[0-9]+\.\s*/, '').split('(')[0].trim() : "";
+    const getShiftFullName = (val: any) => val ? String(val).replace(/^[0-9]+\.\s*/, '').trim() : "";
+
     const toggleDetalle = (turnoNombre: string) => {
         if (turnoSeleccionado === turnoNombre) {
-            setTurnoSeleccionado(null); // Si ya está abierto, lo cierra
+            setTurnoSeleccionado(null);
         } else {
-            setTurnoSeleccionado(turnoNombre); // Abre el seleccionado
+            setTurnoSeleccionado(turnoNombre);
         }
     };
 
@@ -103,6 +164,37 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
 
             {hasSearched && (
                 <div className="mt-8 bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+                    
+                    {/* ✨ BARRA SUPERIOR DE CONTROL DE CIERRE ✨ */}
+                    <div className="bg-gray-100 p-4 border-b border-gray-200 flex flex-col sm:flex-row justify-between items-center gap-4">
+                        <div>
+                            {isClosed ? (
+                                <div className="bg-red-100 text-red-800 border border-red-200 px-4 py-2 rounded-md font-bold flex items-center gap-2 shadow-sm">
+                                    <Lock className="w-5 h-5" /> 
+                                    CIERRE ENVIADO Y BLOQUEADO
+                                    <span className="text-xs font-normal ml-2 opacity-80">(Solo lectura)</span>
+                                </div>
+                            ) : (
+                                <div className="bg-green-100 text-green-800 border border-green-200 px-4 py-2 rounded-md font-bold flex items-center gap-2 shadow-sm">
+                                    <CheckCircle className="w-5 h-5" />
+                                    DÍA ABIERTO Y EDITABLE
+                                </div>
+                            )}
+                        </div>
+                        
+                        <button 
+                            onClick={handleEnviarCierre}
+                            disabled={isClosed || isSending || datosPagos.length === 0}
+                            className={`flex items-center justify-center gap-2 px-6 py-2.5 rounded-md font-bold transition-all shadow-sm w-full sm:w-auto
+                                ${isClosed ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 
+                                  datosPagos.length === 0 ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 
+                                  'bg-blue-600 text-white hover:bg-blue-700 hover:shadow-md'}`}
+                        >
+                            {isClosed ? <Lock className="w-4 h-4" /> : <Send className="w-4 h-4" />}
+                            {isSending ? "Enviando y Bloqueando..." : isClosed ? "Cierre Completado" : "Enviar Cierre Diario Definitivo"}
+                        </button>
+                    </div>
+
                     <div className="flex border-b border-gray-200 bg-gray-50 flex-wrap">
                         <button className={`flex-1 min-w-[200px] py-4 text-center font-bold flex items-center justify-center gap-2 transition-colors ${pestañaActiva === 'inventario' ? 'text-blue-700 border-b-2 border-blue-700 bg-white' : 'text-gray-500 hover:text-gray-700'}`} onClick={() => setPestañaActiva('inventario')}>
                             <Package className="w-5 h-5" /> Cuadre de Almacen
@@ -119,7 +211,6 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
                         {pestañaActiva === 'inventario' && (
                             <div className="animate-in fade-in duration-300">
                                 <h2 className="text-lg font-bold text-gray-800 mb-4">Rotacion de Ingredientes</h2>
-                                {/* Tu código de inventario sigue aquí intacto... */}
                                  <div className="overflow-x-auto border rounded-lg max-h-[600px] overflow-y-auto">
                                     <table className="min-w-full text-left text-sm whitespace-nowrap">
                                         <thead className="bg-gray-100 border-b border-gray-200 sticky top-0">
@@ -189,7 +280,7 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
                                         <div className="p-3 bg-green-500 text-white rounded-full"><DollarSign className="w-6 h-6" /></div>
                                         <div>
                                             <p className="text-sm font-medium text-green-800">Ingresos Totales</p>
-                                            <p className="text-2xl font-bold text-green-900">S/ {Number(kpis.total_dinero).toFixed(2)}</p>
+                                            <p className="text-2xl font-bold text-green-900">S/ {formatMoneda(kpis.total_dinero)}</p>
                                         </div>
                                     </div>
                                     <div className="bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 rounded-lg p-5 shadow-sm flex items-center gap-4">
@@ -203,7 +294,7 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
                                         <div className="p-3 bg-purple-500 text-white rounded-full"><Calculator className="w-6 h-6" /></div>
                                         <div>
                                             <p className="text-sm font-medium text-purple-800">Ticket Promedio</p>
-                                            <p className="text-2xl font-bold text-purple-900">S/ {Number(kpis.ticket_promedio).toFixed(2)}</p>
+                                            <p className="text-2xl font-bold text-purple-900">S/ {formatMoneda(kpis.ticket_promedio)}</p>
                                         </div>
                                     </div>
                                 </div>
@@ -218,11 +309,11 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
                                                 </thead>
                                                 <tbody className="divide-y divide-gray-100">
                                                     {datosPagos.length > 0 ? datosPagos.map((pago, idx) => (
-                                                        <tr key={idx} className="hover:bg-gray-50"><td className="p-3 font-medium uppercase text-gray-800">{pago.metodo_pago}</td><td className="p-3 text-center text-gray-600">{pago.cantidad_transacciones}</td><td className="p-3 text-right text-gray-800">S/ {Number(pago.total_recaudado).toFixed(2)}</td></tr>
+                                                        <tr key={idx} className="hover:bg-gray-50"><td className="p-3 font-medium uppercase text-gray-800">{pago.metodo_pago}</td><td className="p-3 text-center text-gray-600">{pago.cantidad_transacciones}</td><td className="p-3 text-right text-gray-800">S/ {formatMoneda(pago.total_recaudado)}</td></tr>
                                                     )) : <tr><td colSpan={3} className="p-4 text-center text-gray-500">No hay ventas registradas</td></tr>}
                                                 </tbody>
                                                 <tfoot className="bg-green-50 border-t border-green-200">
-                                                    <tr><td className="p-3 font-bold text-green-900">TOTALES</td><td className="p-3 text-center font-bold text-green-900">{totalTickets}</td><td className="p-3 text-right font-bold text-green-700 text-lg">S/ {totalDineroPagos.toFixed(2)}</td></tr>
+                                                    <tr><td className="p-3 font-bold text-green-900">TOTALES</td><td className="p-3 text-center font-bold text-green-900">{totalTickets}</td><td className="p-3 text-right font-bold text-green-700 text-lg">S/ {formatMoneda(totalDineroPagos)}</td></tr>
                                                 </tfoot>
                                             </table>
                                         </div>
@@ -236,11 +327,11 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
                                                 </thead>
                                                 <tbody className="divide-y divide-gray-100">
                                                     {datosArticulos.length > 0 ? datosArticulos.map((art, idx) => (
-                                                        <tr key={idx} className="hover:bg-gray-50"><td className="p-3 font-medium text-gray-800">{art.articulo}</td><td className="p-3 text-center text-gray-600">{Number(art.cantidad_vendida).toFixed(0)}</td><td className="p-3 text-right text-gray-800">S/ {Number(art.total_generado).toFixed(2)}</td></tr>
+                                                        <tr key={idx} className="hover:bg-gray-50"><td className="p-3 font-medium text-gray-800">{art.articulo}</td><td className="p-3 text-center text-gray-600">{Number(art.cantidad_vendida).toFixed(0)}</td><td className="p-3 text-right text-gray-800">S/ {formatMoneda(art.total_generado)}</td></tr>
                                                     )) : <tr><td colSpan={3} className="p-4 text-center text-gray-500">No hay detalles de venta</td></tr>}
                                                 </tbody>
                                                 <tfoot className="bg-blue-50 border-t border-blue-200">
-                                                    <tr><td className="p-3 font-bold text-blue-900">TOTALES</td><td className="p-3 text-center font-bold text-blue-900">{totalCantidadArticulos.toFixed(0)}</td><td className="p-3 text-right font-bold text-blue-700 text-lg">S/ {totalDineroArticulos.toFixed(2)}</td></tr>
+                                                    <tr><td className="p-3 font-bold text-blue-900">TOTALES</td><td className="p-3 text-center font-bold text-blue-900">{totalCantidadArticulos.toFixed(0)}</td><td className="p-3 text-right font-bold text-blue-700 text-lg">S/ {formatMoneda(totalDineroArticulos)}</td></tr>
                                                 </tfoot>
                                             </table>
                                         </div>
@@ -249,7 +340,6 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
                             </div>
                         )}
 
-                        {/* ✨ NUEVA VISTA: GRÁFICA Y DETALLES POR TURNO */}
                         {pestañaActiva === 'turnos' && (
                             <div className="space-y-8 animate-in fade-in duration-300">
                                 
@@ -260,18 +350,17 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
                                     </h2>
                                     {datosTurnos.length > 0 ? (
                                         <div className="h-[350px] w-full">
-                                            <ResponsiveContainer width="100%" height="100%">
+                                            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                                                 <BarChart data={datosTurnos} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
                                                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                                                    {/* Usamos substring(3) para quitar el "1. " o "2. " del nombre del turno */}
-                                                    <XAxis dataKey="rango_horas" tickFormatter={(val) => val.substring(3).split('(')[0].trim()} stroke="#6b7280" />
-                                                    <YAxis stroke="#6b7280" tickFormatter={(val) => `S/ ${val}`} />
+                                                    <XAxis dataKey="rango_horas" tickFormatter={getShiftNameOnly} stroke="#6b7280" />
+                                                    <YAxis stroke="#6b7280" tickFormatter={(val) => `S/ ${formatMoneda(val)}`} />
                                                     <RechartsTooltip 
-    cursor={{fill: '#f3f4f6'}} 
-    contentStyle={{borderRadius: '8px', border: '1px solid #e5e7eb'}} 
-    formatter={(value: any) => [`S/ ${Number(value).toFixed(2)}`, 'Generado']} 
-    labelFormatter={(label: any) => label ? String(label).substring(3) : ''} 
-/>
+                                                        cursor={{fill: '#f3f4f6'}} 
+                                                        contentStyle={{borderRadius: '8px', border: '1px solid #e5e7eb'}} 
+                                                        formatter={(value: any) => [`S/ ${formatMoneda(value)}`, 'Generado']} 
+                                                        labelFormatter={getShiftFullName} 
+                                                    />
                                                     <Bar dataKey="total_generado" radius={[4, 4, 0, 0]}>
                                                         {datosTurnos.map((entry, index) => (
                                                             <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
@@ -295,22 +384,25 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
                                     
                                     <div className="divide-y divide-gray-200">
                                         {datosTurnos.length > 0 ? datosTurnos.map((turno, idx) => {
-                                            const nombreLimpio = turno.rango_horas.substring(3).split('(')[0].trim(); // Ej: "Mañana"
-                                            // Filtramos los productos que corresponden a este turno específico
-                                            const productosDelTurno = detallesTurnos.filter(d => d.turno_nombre.includes(nombreLimpio));
+                                            const nombreLimpio = getShiftNameOnly(turno.rango_horas); 
+                                            const nombreCompleto = getShiftFullName(turno.rango_horas);
+                                            
+                                            const productosDelTurno = detallesTurnos.filter(d => {
+                                                const dNombreLimpio = getShiftNameOnly(d.turno_nombre);
+                                                return dNombreLimpio === nombreLimpio;
+                                            });
                                             
                                             return (
                                             <div key={idx} className="flex flex-col">
-                                                {/* Fila Principal del Turno */}
                                                 <div className="p-5 flex flex-wrap items-center justify-between gap-4 bg-white hover:bg-gray-50 transition-colors">
                                                     <div>
-                                                        <p className="font-bold text-gray-800 text-lg">{turno.rango_horas.substring(3)}</p>
+                                                        <p className="font-bold text-gray-800 text-lg">{nombreCompleto}</p>
                                                         <p className="text-sm text-gray-500">{turno.cantidad_operaciones} operaciones realizadas</p>
                                                     </div>
                                                     <div className="flex items-center gap-6">
                                                         <div className="text-right">
                                                             <p className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Total Generado</p>
-                                                            <p className="font-bold text-xl text-orange-600">S/ {Number(turno.total_generado).toFixed(2)}</p>
+                                                            <p className="font-bold text-xl text-orange-600">S/ {formatMoneda(turno.total_generado)}</p>
                                                         </div>
                                                         <button 
                                                             onClick={() => toggleDetalle(nombreLimpio)}
@@ -322,23 +414,22 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
                                                     </div>
                                                 </div>
 
-                                                {/* Acordeón de Productos (Se muestra solo si se hace clic) */}
                                                 {turnoSeleccionado === nombreLimpio && (
                                                     <div className="bg-gray-50 p-5 border-t border-gray-100 animate-in slide-in-from-top-2 duration-200">
                                                         <h4 className="font-semibold text-gray-700 mb-3 text-sm uppercase tracking-wider">Productos Vendidos</h4>
                                                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                                                             {productosDelTurno.length > 0 ? productosDelTurno.map((prod, i) => (
                                                                 <div key={i} className="bg-white p-3 rounded-md border border-gray-200 shadow-sm flex items-center justify-between">
-                                                                    <div className="flex items-center gap-3">
-                                                                        <div className="bg-blue-100 text-blue-700 font-bold px-2 py-1 rounded text-sm">
+                                                                    <div className="flex items-center gap-3 overflow-hidden">
+                                                                        <div className="bg-blue-100 text-blue-700 font-bold px-2 py-1 rounded text-sm shrink-0">
                                                                             x{prod.cantidad_vendida}
                                                                         </div>
                                                                         <p className="font-medium text-gray-800 truncate" title={prod.articulo}>{prod.articulo}</p>
                                                                     </div>
-                                                                    <p className="font-semibold text-gray-600">S/ {Number(prod.total_generado).toFixed(2)}</p>
+                                                                    <p className="font-semibold text-gray-600 shrink-0">S/ {formatMoneda(prod.total_generado)}</p>
                                                                 </div>
                                                             )) : (
-                                                                <p className="text-sm text-gray-500 italic">No hay detalle de productos para este turno.</p>
+                                                                <p className="text-sm text-gray-500 italic col-span-full">No hay detalle de productos para este turno.</p>
                                                             )}
                                                         </div>
                                                     </div>

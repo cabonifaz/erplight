@@ -2,9 +2,9 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useSession } from 'next-auth/react';
-import { obtenerNotificacionesCumpleanos } from '@/actions/rrhh-actions';
+// Asegúrate de importar la nueva acción desde tu archivo correspondiente
+import { obtenerNotificacionesCumpleanos, obtenerNotificacionesGenerales } from '@/actions/rrhh-actions';
 
-// ✨ Interfaz genérica para CUALQUIER tipo de notificación
 interface NotificacionEstandar {
     id: string;
     icono: string;
@@ -25,10 +25,11 @@ export default function NotificationBell() {
             const rolCrudo = (session?.user as any)?.role || 'GERENTE_GENERAL';
             const rolUsuario = rolCrudo.toUpperCase().replace(' ', '_'); 
             const branchId = (session?.user as any)?.branch_id || 1;
+            const userId = (session?.user as any)?.id; // ✨ Necesitamos el ID del usuario
             
             let bandejaGenérica: NotificacionEstandar[] = [];
 
-            // 1. CARGAMOS LOS CUMPLEAÑOS Y LOS ADAPTAMOS AL FORMATO GENÉRICO
+            // 1. CARGAMOS LOS CUMPLEAÑOS
             const resCumples = await obtenerNotificacionesCumpleanos(branchId, rolUsuario);
             if (resCumples.success && resCumples.data) {
                 const cumplesFormateados = resCumples.data.map((n: any) => ({
@@ -42,8 +43,30 @@ export default function NotificationBell() {
                 bandejaGenérica = [...bandejaGenérica, ...cumplesFormateados];
             }
 
-            // 2. Aquí en el futuro puedes hacer más peticiones (ej. obtenerAlertasStock()) 
-            // y sumarlas al array `bandejaGenérica` con sus propios iconos 📦 o ⚠️.
+            // ✨ 2. CARGAMOS LAS NOTIFICACIONES DE LA BASE DE DATOS (Cierres, alertas, etc.)
+            if (userId) {
+                const resGenerales = await obtenerNotificacionesGenerales(Number(userId));
+                if (resGenerales.success && resGenerales.data) {
+                    const generalesFormateadas = resGenerales.data.map((n: any) => {
+                        // Formateamos la fecha a "21/04/2026, 10:45 AM"
+                        const fechaFormateada = new Date(n.created_at).toLocaleString('es-PE', {
+                            day: '2-digit', month: '2-digit', year: 'numeric', 
+                            hour: '2-digit', minute: '2-digit', hour12: true
+                        });
+
+                        return {
+                            id: `gen-${n.id}`,
+                            // Si el título contiene "Cierre", ponemos un candado, si no, una campana
+                            icono: n.title.includes('Cierre') ? '🔒' : '🔔',
+                            titulo: n.title,
+                            mensaje: n.message,
+                            subtexto: fechaFormateada,
+                            resaltado: true // Lo resaltamos porque es una alerta de sistema
+                        };
+                    });
+                    bandejaGenérica = [...bandejaGenérica, ...generalesFormateadas];
+                }
+            }
 
             setNotificaciones(bandejaGenérica);
         };
@@ -68,7 +91,7 @@ export default function NotificationBell() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
                 </svg>
                 {notificaciones.length > 0 && (
-                    <span className="absolute top-0 right-0 inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] font-bold leading-none text-white transform translate-x-1/4 -translate-y-1/4 bg-red-600 border-2 border-white rounded-full">
+                    <span className="absolute top-0 right-0 inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] font-bold leading-none text-white transform translate-x-1/4 -translate-y-1/4 bg-red-600 border-2 border-white rounded-full shadow-sm">
                         {notificaciones.length}
                     </span>
                 )}
@@ -82,7 +105,6 @@ export default function NotificationBell() {
                     </div>
                     
                     <div className="max-h-80 overflow-y-auto">
-                        {/* ✨ DISEÑO DE ESTADO VACÍO GENÉRICO */}
                         {notificaciones.length === 0 ? (
                             <div className="p-8 text-center text-gray-400">
                                 <p className="text-4xl mb-3">📭</p>
@@ -90,16 +112,15 @@ export default function NotificationBell() {
                                 <p className="text-xs text-gray-400 mt-1">Estás al día con todo.</p>
                             </div>
                         ) : (
-                            /* ✨ DISEÑO DE LISTA GENÉRICO */
                             notificaciones.map((n) => (
-                                <div key={n.id} className={`p-4 border-b border-gray-50 hover:bg-gray-50 transition-colors flex gap-4 items-start cursor-default ${n.resaltado ? 'bg-red-50/30' : ''}`}>
+                                <div key={n.id} className={`p-4 border-b border-gray-50 hover:bg-gray-50 transition-colors flex gap-4 items-start cursor-default ${n.resaltado ? 'bg-blue-50/40' : ''}`}>
                                     <div className="text-2xl flex-shrink-0 mt-0.5">{n.icono}</div>
                                     <div>
                                         <p className="text-sm text-gray-800 leading-snug">
-                                            <span className="font-bold text-gray-900 mr-1">{n.titulo}</span> 
+                                            <span className="font-bold text-gray-900 mr-1 block mb-0.5">{n.titulo}</span> 
                                             {n.mensaje}
                                         </p>
-                                        {n.subtexto && <p className="text-[11px] text-gray-500 mt-1.5 font-medium">{n.subtexto}</p>}
+                                        {n.subtexto && <p className="text-[10px] text-gray-400 mt-1.5 font-bold uppercase tracking-wider">{n.subtexto}</p>}
                                     </div>
                                 </div>
                             ))
