@@ -24,7 +24,7 @@ import {
   Globe, 
   CalendarDays,
   Building2,
-  Briefcase // ✨ NUEVO: Ícono para RRHH
+  Briefcase
 } from "lucide-react";
 
 interface MenuItem {
@@ -58,7 +58,6 @@ export const menuItems: MenuItem[] = [
     ]
   },
   { href: "/clientes", label: "Clientes / Proveedores", icon: Users },
-  // ✨ NUEVO: Agregamos RRHH aquí
   { href: "/rrhh", label: "RRHH", icon: Briefcase },
   { 
     label: "Reportes", 
@@ -83,10 +82,19 @@ export function Sidebar({ user }: { user?: any }) {
     setOpenMenus(prev => ({ ...prev, [label]: !prev[label] }));
   };
 
+  // ✨ AQUÍ ESTÁ LA MAGIA: Convertimos Configuración en un Dropdown
   const adminItems: MenuItem[] = [
     { href: "/sucursales", label: "Sucursales", icon: Building },
     { href: "/usuarios", label: "Usuarios", icon: UserCog },
-    { href: "/configuracion", label: "Configuración", icon: Settings }, 
+    { 
+      label: "Configuración", 
+      icon: Settings, 
+      isDropdown: true, 
+      subItems: [
+        { href: "/configuracion", label: "Ajustes Generales", icon: Settings },
+        { href: "/configuracion/calendario", label: "Calendario Festivos", icon: CalendarDays }
+      ]
+    }, 
   ];
 
   const allAvailableItems = user?.role === 'GERENTE GENERAL' 
@@ -94,7 +102,6 @@ export function Sidebar({ user }: { user?: any }) {
     : menuItems;
 
   const displayItems = allAvailableItems.filter(item => {
-    // ✨ ACTUALIZADO: Regla de seguridad para Ventas y RRHH
     if (item.label === "Ventas & OC" || item.label === "RRHH") {
       return user?.role === "GERENTE GENERAL" || user?.role === "ADMIN_SUCURSAL";
     }

@@ -366,3 +366,20 @@ export async function obtenerLimiteDiasReporte() {
         connection.release();
     }
 }
+
+// --- 4. ANÁLISIS DE ABASTECIMIENTO (PREDICCIÓN DE STOCK) ---
+export async function analizarInventarioCompras(branchId: number) {
+    const session = await auth();
+    if (!session?.user?.id) return { success: false, message: "No autorizado", data: [] };
+
+    const connection = await pool.getConnection();
+    try {
+        const [rows]: any = await connection.query("CALL sp_analizar_inventario_compras(?)", [branchId]);
+        return { success: true, data: rows[0] || [] };
+    } catch (error: any) {
+        console.error("Error analizando inventario para compras:", error);
+        return { success: false, message: error.message, data: [] };
+    } finally {
+        connection.release();
+    }
+}

@@ -98,7 +98,6 @@ export async function registerManualAdjustment(formData: FormData) {
     }
 }
 
-// --- OBTENER INVENTARIO PRINCIPAL CON FILTROS ---
 // --- OBTENER INVENTARIO PRINCIPAL CON FILTROS (VERSION SEGURA) ---
 export async function getInventoryStocks(filters: {
     branch_id?: number | null;
@@ -119,9 +118,7 @@ export async function getInventoryStocks(filters: {
         let targetBranchId = filters.branch_id || null;
 
         // 🛡️ RESTRICCIÓN: Solo el GERENTE GENERAL y ADMINISTRADOR GENERAL pueden saltarse el filtro
-        // Quitamos a 'GERENTE DE LOGISTICA' de aquí
-        // Agregamos nuevamente el rol a la lista de privilegiados
-const PRIVILEGED_ROLES = ['GERENTE GENERAL', 'GERENTE DE LOGISTICA', 'ADMINISTRADOR GENERAL'];
+        const PRIVILEGED_ROLES = ['GERENTE GENERAL', 'GERENTE DE LOGISTICA', 'ADMINISTRADOR GENERAL'];
         
         if (!PRIVILEGED_ROLES.includes(role)) {
             // Si el rol NO está en la lista de arriba (como María o Lucas)...
@@ -146,5 +143,106 @@ const PRIVILEGED_ROLES = ['GERENTE GENERAL', 'GERENTE DE LOGISTICA', 'ADMINISTRA
     } catch (error) {
         console.error("Error obteniendo inventario filtrado:", error);
         return [];
+    }
+}
+
+// ============================================================================
+// ✨ NUEVO: CARGA MASIVA DE AJUSTE (EXCEL)
+// ============================================================================
+export async function procesarAjusteInventarioExcel(payload: { branchId: number, data: any[] }) {
+    const session = await auth();
+    if (!session?.user) return { success: false, message: "No autorizado." };
+
+    // 1. VALIDACIÓN DE ROLES (Los mismos de arriba)
+    const role = session.user.role?.toUpperCase() || "";
+    const PRIVILEGED_ROLES = ['GERENTE GENERAL', 'GERENTE DE LOGISTICA', 'ADMINISTRADOR GENERAL'];
+    
+    if (!PRIVILEGED_ROLES.includes(role)) {
+        return { 
+            success: false, 
+            message: "Acceso denegado. Solo la Gerencia o Logística pueden hacer cargas masivas por Excel." 
+        };
+    }
+
+    const inventarioData = payload.data;
+    const branchId = payload.branchId;
+    const connection = await pool.getConnection();
+
+    try {
+        await connection.beginTransaction();
+
+        const productosNoEncontrados: string[] = [];
+        const actualizaciones: { productId: number, nuevoStock: number }[] = [];
+
+        // 2. LECTURA Y VALIDACIÓN ESTRICTA DEL EXCEL
+        for (const fila of inventarioData) {
+            const getCol = (keys: string[]) => {
+                const exactKey = Object.keys(fila).find(k => keys.includes(k.toLowerCase().trim()));
+                return exactKey ? fila[exactKey] : undefined;
+            };
+
+            const nombreProducto = getCol(['producto', 'productos', 'item', 'insumo']);
+            const stockNuevo = Number(getCol(['stock', 'cantidad', 'stock actual']));
+
+            if (!nombreProducto) continue; // Ignoramos filas vacías
+
+            if (isNaN(stockNuevo)) {
+                throw new Error(`La cantidad de stock para "${nombreProducto}" no es un número válido.`);
+            }
+
+            // 3. VERIFICACIÓN CONTRA LA TABLA MAESTRA (products)
+            const [rows]: any = await connection.query(
+                "SELECT id FROM products WHERE name = ? AND status = 1", 
+                [nombreProducto.trim()]
+            );
+
+            if (rows.length === 0) {
+                productosNoEncontrados.push(nombreProducto);
+            } else {
+                actualizaciones.push({ productId: rows[0].id, nuevoStock: stockNuevo });
+            }
+        }
+
+        // 4. REGLA DE NEGOCIO (CRIS): RECHAZO TOTAL SI HAY INTRUSOS
+        if (productosNoEncontrados.length > 0) {
+            await connection.rollback();
+            return { 
+                success: false, 
+                message: "Carga rechazada. El Excel contiene productos que no existen en la base de datos maestra.",
+                errores: productosNoEncontrados 
+            };
+        }
+
+        // 5. ACTUALIZACIÓN MASIVA DE STOCK
+        for (const act of actualizaciones) {
+            // Intentamos actualizar primero (recordemos que tu columna se llama stock_current)
+            const [updateResult]: any = await connection.query(
+                "UPDATE product_stocks SET stock_current = ?, last_update = NOW() WHERE branch_id = ? AND product_id = ?",
+                [act.nuevoStock, branchId, act.productId]
+            );
+
+            // Si no existía el registro de stock para esa sucursal, lo insertamos
+            if (updateResult.affectedRows === 0) {
+                await connection.query(
+                    `INSERT INTO product_stocks (branch_id, product_id, stock_current, min_stock, max_stock, reorder_point, last_update) 
+                     VALUES (?, ?, ?, 5, 100, 10, NOW())`,
+                    [branchId, act.productId, act.nuevoStock]
+                );
+            }
+        }
+
+        await connection.commit();
+        revalidatePath('/inventario'); 
+        return { 
+            success: true, 
+            message: `¡Ajuste masivo exitoso! Se actualizaron ${actualizaciones.length} productos en el inventario.` 
+        };
+
+    } catch (error: any) {
+        await connection.rollback();
+        console.error("Error en ajuste masivo de inventario:", error);
+        return { success: false, message: error.message || "Error al procesar el archivo en la base de datos." };
+    } finally {
+        connection.release();
     }
 }
