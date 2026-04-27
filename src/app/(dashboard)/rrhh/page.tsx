@@ -1,14 +1,16 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useSession } from 'next-auth/react'; 
+import * as XLSX from 'xlsx'; // ✨ IMPORTACIÓN PARA EXPORTAR EXCEL
 import { 
     getEmpleadosPorSucursal, crearEmpleado, editarEmpleado, registrarAsistencia, 
     obtenerHorariosSemana, guardarHorarioEmpleado, obtenerCatalogosRRHH, 
     obtenerEstadoAsistencia, obtenerSucursales, obtenerDisponibilidad, 
     guardarDisponibilidad, autogenerarHorarioSemana, publicarHorariosSemana, 
-    eliminarHorarioEmpleado,
-    obtenerReporteHoras // ✨ IMPORTACIÓN DEL REPORTE AGREGADA
+    eliminarHorarioEmpleado, obtenerReporteHoras,
+    // ✨ IMPORTAMOS LAS NUEVAS FUNCIONES DE CONTRATOS (Incluyendo eliminar)
+    getContratosEmpleado, subirContratoEmpleado, eliminarContratoEmpleado 
 } from '@/actions/rrhh-actions';
 
 const getLunes = (d: Date) => {
@@ -49,11 +51,18 @@ export default function RRHHPage() {
     const [dispEmp, setDispEmp] = useState({ id: 0, nombre: '' });
     const [dispData, setDispData] = useState<any[]>([]);
 
-    // ✨ ESTADOS PARA EL REPORTE
     const [reporteInicio, setReporteInicio] = useState<string>(new Date(new Date().setDate(1)).toISOString().split('T')[0]); 
     const [reporteFin, setReporteFin] = useState<string>(new Date().toISOString().split('T')[0]); 
     const [reporteDatos, setReporteDatos] = useState<any[]>([]);
     const [cargandoReporte, setCargandoReporte] = useState(false);
+
+    // ✨ ESTADOS PARA EL MÓDULO DE CONTRATOS
+    const [isContratoModalOpen, setIsContratoModalOpen] = useState(false);
+    const [contratoEmp, setContratoEmp] = useState({ id: 0, nombre: '' });
+    const [contratosLista, setContratosLista] = useState<any[]>([]); 
+    const [nuevoContratoFecha, setNuevoContratoFecha] = useState('');
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const [subiendoContrato, setSubiendoContrato] = useState(false); 
 
     const diasDeLaSemana = Array.from({ length: 7 }).map((_, i) => {
         const d = new Date(semanaActual);
@@ -92,7 +101,6 @@ export default function RRHHPage() {
         if (sucursalActiva) {
             cargarDatosSucursal();
             setEmpleadoMarcacion('');
-            // Opcional: Limpiar el reporte al cambiar de sucursal
             setReporteDatos([]);
         }
     }, [sucursalActiva, semanaActual]);
@@ -122,7 +130,9 @@ export default function RRHHPage() {
             obtenerHorariosSemana(sucursalActiva, semanaActual.toISOString().split('T')[0], fechaFin.toISOString().split('T')[0]) 
         ]);
         
-        if (resEmp.success) setEmpleados(resEmp.data);
+        if (resEmp.success) {
+            setEmpleados(resEmp.data);
+        }
         if (resHor.success) setHorariosGlobales(resHor.data || []);
         setLoading(false);
     };
@@ -277,13 +287,84 @@ export default function RRHHPage() {
         setLoading(false);
     };
 
-    // ✨ FUNCIÓN PARA GENERAR REPORTE
     const handleGenerarReporte = async () => {
         setCargandoReporte(true);
         const res = await obtenerReporteHoras(sucursalActiva, reporteInicio, reporteFin);
         if (res.success) setReporteDatos(res.data);
         else alert("Error al obtener el reporte.");
         setCargandoReporte(false);
+    };
+
+    const handleExportarExcel = () => {
+        if(reporteDatos.length === 0) return alert("No hay datos para exportar. Genera el reporte primero.");
+        
+        const datosFormateados = reporteDatos.map(row => ({
+            "Personal": row.nombre_completo,
+            "Documento": row.numero_documento,
+            "Cargo": row.cargo,
+            "Total Horas Oficiales": Number(row.total_horas)
+        }));
+
+        const ws = XLSX.utils.json_to_sheet(datosFormateados);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Planilla");
+        
+        XLSX.writeFile(wb, `Planilla_Pagos_${reporteInicio}_al_${reporteFin}.xlsx`);
+    };
+
+    // ✨ ABRIR MODAL CONTRATOS
+    const handleAbrirContratos = async (emp: any) => {
+        setContratoEmp({ id: emp.id, nombre: emp.nombre_completo });
+        setIsContratoModalOpen(true);
+        setContratosLista([]); 
+        
+        const res = await getContratosEmpleado(emp.id);
+        if (res.success) setContratosLista(res.data);
+    };
+
+    // ✨ SUBIR EL PDF
+    const handleSubirContrato = async () => {
+        if (!nuevoContratoFecha) return alert("Selecciona la fecha de vencimiento");
+        const file = fileInputRef.current?.files?.[0];
+        if (!file) return alert("Selecciona un archivo PDF");
+
+        setSubiendoContrato(true);
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('employeeId', String(contratoEmp.id));
+        formData.append('fechaVencimiento', nuevoContratoFecha);
+
+        const res = await subirContratoEmpleado(formData);
+        
+        if (res.success) {
+            alert("✅ " + res.message);
+            setNuevoContratoFecha(''); 
+            if(fileInputRef.current) fileInputRef.current.value = '';
+            
+            const listRes = await getContratosEmpleado(contratoEmp.id);
+            if (listRes.success) setContratosLista(listRes.data);
+            cargarDatosSucursal(); // Refrescar lista para alerta de vencimiento
+        } else {
+            alert("❌ Error: " + res.message);
+        }
+        setSubiendoContrato(false);
+    };
+
+    // ✨ NUEVA FUNCIÓN: ELIMINAR CONTRATO
+    const handleEliminarContrato = async (idContrato: number, urlArchivo: string) => {
+        if (!confirm("¿Seguro que deseas eliminar este contrato? Esta acción no se puede deshacer.")) return;
+        
+        const res = await eliminarContratoEmpleado(idContrato, urlArchivo);
+        if (res.success) {
+            // Actualizar la lista en el modal
+            const listRes = await getContratosEmpleado(contratoEmp.id);
+            if (listRes.success) setContratosLista(listRes.data);
+            
+            // Actualizar la lista principal por si cambia la alerta de "Vence pronto"
+            cargarDatosSucursal(); 
+        } else {
+            alert("❌ Error al eliminar: " + res.message);
+        }
     };
 
     if (status === 'loading') return <div className="min-h-[60vh] flex justify-center items-center font-bold text-gray-500">Cargando credenciales...</div>;
@@ -325,7 +406,6 @@ export default function RRHHPage() {
                 <button onClick={() => setActiveTab('empleados')} className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${activeTab === 'empleados' ? 'bg-white shadow text-blue-700' : 'text-gray-600 hover:text-gray-900'}`}>Lista de Personal</button>
                 <button onClick={() => setActiveTab('asistencia')} className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${activeTab === 'asistencia' ? 'bg-white shadow text-blue-700' : 'text-gray-600 hover:text-gray-900'}`}>Control de Asistencia</button>
                 <button onClick={() => setActiveTab('horarios')} className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${activeTab === 'horarios' ? 'bg-white shadow text-blue-700' : 'text-gray-600 hover:text-gray-900'}`}>Planificador Semanal</button>
-                {/* ✨ NUEVO BOTÓN DE PESTAÑA: REPORTES */}
                 <button onClick={() => setActiveTab('reportes')} className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${activeTab === 'reportes' ? 'bg-white shadow text-blue-700' : 'text-gray-600 hover:text-gray-900'}`}>Reportes</button>
             </div>
 
@@ -350,7 +430,14 @@ export default function RRHHPage() {
                                         ) : (
                                             empleados.map(emp => (
                                                 <tr key={emp.id} className="hover:bg-gray-50">
-                                                    <td className="p-3 font-medium text-gray-800">{emp.nombre_completo}</td>
+                                                    <td className="p-3 font-medium text-gray-800">
+                                                        {emp.nombre_completo}
+                                                        {emp.dias_vencimiento_contrato !== null && emp.dias_vencimiento_contrato !== undefined && emp.dias_vencimiento_contrato <= 10 && emp.dias_vencimiento_contrato >= 0 && (
+                                                            <span title={`El contrato vence en ${emp.dias_vencimiento_contrato} días`} className="ml-2 bg-red-100 text-red-700 text-[10px] px-2 py-0.5 rounded-full font-bold border border-red-200">
+                                                                🔴 Vence pronto
+                                                            </span>
+                                                        )}
+                                                    </td>
                                                     <td className="p-3 text-gray-600">{emp.numero_documento}</td>
                                                     <td className="p-3"><span className="bg-blue-50 text-blue-700 px-2 py-1 rounded-md text-xs font-semibold">{emp.cargo}</span></td>
                                                     <td className="p-3 text-center">
@@ -358,6 +445,8 @@ export default function RRHHPage() {
                                                             <button onClick={() => handleAbrirEditar(emp)} className="text-blue-600 hover:text-blue-800 font-medium">Editar</button>
                                                             <span className="text-gray-300">|</span>
                                                             <button onClick={() => handleAbrirDisponibilidad(emp)} className="text-orange-600 hover:text-orange-800 font-medium">⏳ Disponibilidad</button>
+                                                            <span className="text-gray-300">|</span>
+                                                            <button onClick={() => handleAbrirContratos(emp)} className="text-purple-600 hover:text-purple-800 font-medium">📄 Contratos</button>
                                                         </div>
                                                     </td>
                                                 </tr>
@@ -479,7 +568,7 @@ export default function RRHHPage() {
                     </div>
                 )}
 
-                {/* ✨ -------------------- TAB 4: REPORTES -------------------- ✨ */}
+                {/* -------------------- TAB 4: REPORTES -------------------- */}
                 {activeTab === 'reportes' && (
                     <div className="space-y-6">
                         <div className="flex flex-col sm:flex-row justify-between items-center bg-blue-50 p-6 rounded-xl border border-blue-100 shadow-sm">
@@ -498,6 +587,9 @@ export default function RRHHPage() {
                                 </div>
                                 <button onClick={handleGenerarReporte} disabled={cargandoReporte} className="bg-blue-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-blue-700 shadow-md transition-all disabled:opacity-50">
                                     {cargandoReporte ? 'Calculando...' : 'Generar'}
+                                </button>
+                                <button onClick={handleExportarExcel} className="bg-green-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-green-700 shadow-md transition-all">
+                                    📥 Exportar Excel
                                 </button>
                             </div>
                         </div>
@@ -673,6 +765,94 @@ export default function RRHHPage() {
                                     {loading ? '...' : 'Guardar'}
                                 </button>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ✨ -------------------- MODAL: CONTRATOS COMPLETADO -------------------- ✨ */}
+            {isContratoModalOpen && (
+                <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[90]">
+                    <div className="bg-white p-6 rounded-2xl shadow-2xl w-full max-w-2xl">
+                        <div className="flex justify-between items-center border-b pb-3 mb-4">
+                            <div>
+                                <h3 className="text-xl font-bold text-gray-800">Contratos PDF</h3>
+                                <p className="text-sm text-gray-500">Historial de contratos de <strong>{contratoEmp.nombre}</strong></p>
+                            </div>
+                            <button onClick={() => setIsContratoModalOpen(false)} className="text-gray-400 hover:text-gray-600 text-2xl font-bold">&times;</button>
+                        </div>
+
+                        {/* Formulario de Subida Real */}
+                        <div className="bg-purple-50 p-4 rounded-lg border border-purple-100 mb-6">
+                            <h4 className="text-sm font-bold text-purple-800 mb-3">Subir Nuevo Contrato</h4>
+                            <div className="flex flex-col sm:flex-row gap-4 items-end">
+                                <div className="flex-1">
+                                    <label className="block text-xs font-bold text-gray-600 mb-1">Vencimiento del Contrato</label>
+                                    <input 
+                                        type="date" 
+                                        className="w-full p-2 text-sm border rounded-md" 
+                                        value={nuevoContratoFecha} 
+                                        onChange={(e) => setNuevoContratoFecha(e.target.value)} 
+                                    />
+                                </div>
+                                <div className="flex-1">
+                                    <label className="block text-xs font-bold text-gray-600 mb-1">Archivo PDF</label>
+                                    <input 
+                                        type="file" 
+                                        accept=".pdf" 
+                                        ref={fileInputRef} 
+                                        className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-purple-100 file:text-purple-700 hover:file:bg-purple-200"
+                                    />
+                                </div>
+                                <button 
+                                    className="bg-purple-600 text-white font-bold py-2 px-6 rounded-md hover:bg-purple-700 text-sm h-[38px] disabled:opacity-50"
+                                    onClick={handleSubirContrato}
+                                    disabled={subiendoContrato}
+                                >
+                                    {subiendoContrato ? 'Subiendo...' : 'Subir e Historiar'}
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Historial de Contratos Actualizado con Botón Eliminar */}
+                        <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                            <table className="min-w-full text-left text-sm whitespace-nowrap">
+                                <thead className="bg-gray-100 border-b border-gray-200">
+                                    <tr>
+                                        <th className="p-3 font-bold text-gray-600">Fecha de Subida</th>
+                                        <th className="p-3 font-bold text-gray-600">Vencimiento</th>
+                                        <th className="p-3 font-bold text-gray-600 text-center">Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-200">
+                                    {contratosLista.length === 0 ? (
+                                        <tr><td colSpan={3} className="p-4 text-center text-gray-500">No hay contratos registrados.</td></tr>
+                                    ) : (
+                                        contratosLista.map((c, i) => (
+                                            <tr key={c.id} className={i === 0 ? "bg-green-50" : "bg-white"}>
+                                                <td className="p-3 font-medium text-gray-800">
+                                                    {new Date(c.fecha_subida).toLocaleDateString()} 
+                                                    {i === 0 && <span className="ml-2 text-[10px] bg-green-200 text-green-800 px-2 py-0.5 rounded uppercase font-bold">Vigente</span>}
+                                                </td>
+                                                <td className="p-3 text-gray-600">{new Date(c.fecha_vencimiento).toLocaleDateString()}</td>
+                                                <td className="p-3 text-center flex items-center justify-center gap-3">
+                                                    <a href={c.file_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 font-bold hover:underline">
+                                                        👁️ Ver PDF
+                                                    </a>
+                                                    <span className="text-gray-300">|</span>
+                                                    <button 
+                                                        onClick={() => handleEliminarContrato(c.id, c.file_url)}
+                                                        className="text-red-500 hover:text-red-700 font-bold text-lg"
+                                                        title="Eliminar contrato"
+                                                    >
+                                                        🗑️
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        ))
+                                    )}
+                                </tbody>
+                            </table>
                         </div>
                     </div>
                 </div>

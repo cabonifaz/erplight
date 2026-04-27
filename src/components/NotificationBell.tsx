@@ -2,8 +2,11 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useSession } from 'next-auth/react';
-// Asegúrate de importar la nueva acción desde tu archivo correspondiente
-import { obtenerNotificacionesCumpleanos, obtenerNotificacionesGenerales } from '@/actions/rrhh-actions';
+import { 
+    obtenerNotificacionesCumpleanos, 
+    obtenerNotificacionesGenerales,
+    obtenerNotificacionesContratos // ✨ IMPORTAMOS LA NUEVA ACCIÓN
+} from '@/actions/rrhh-actions';
 
 interface NotificacionEstandar {
     id: string;
@@ -25,7 +28,7 @@ export default function NotificationBell() {
             const rolCrudo = (session?.user as any)?.role || 'GERENTE_GENERAL';
             const rolUsuario = rolCrudo.toUpperCase().replace(' ', '_'); 
             const branchId = (session?.user as any)?.branch_id || 1;
-            const userId = (session?.user as any)?.id; // ✨ Necesitamos el ID del usuario
+            const userId = (session?.user as any)?.id; 
             
             let bandejaGenérica: NotificacionEstandar[] = [];
 
@@ -43,25 +46,39 @@ export default function NotificationBell() {
                 bandejaGenérica = [...bandejaGenérica, ...cumplesFormateados];
             }
 
-            // ✨ 2. CARGAMOS LAS NOTIFICACIONES DE LA BASE DE DATOS (Cierres, alertas, etc.)
+            // ✨ 2. CARGAMOS ALERTAS DE CONTRATOS (Solo para Gerencias)
+            const rolesAlertaContrato = ['GERENTE_GENERAL', 'GERENTE_DE_LOGISTICA'];
+            if (rolesAlertaContrato.includes(rolUsuario)) {
+                const resContratos = await obtenerNotificacionesContratos();
+                if (resContratos.success && resContratos.data) {
+                    const contratosFormateados = resContratos.data.map((n: any) => ({
+                        id: `contrato-${n.id}`,
+                        icono: '📄',
+                        titulo: 'Renovación Pendiente',
+                        mensaje: `El contrato de ${n.nombre_completo} vence en ${n.dias_restantes} días.`,
+                        subtexto: n.nombre_sucursal,
+                        resaltado: true // Siempre resaltado en rojo/azul porque es urgente
+                    }));
+                    bandejaGenérica = [...bandejaGenérica, ...contratosFormateados];
+                }
+            }
+
+            // 3. CARGAMOS LAS NOTIFICACIONES GENERALES DE LA BD
             if (userId) {
                 const resGenerales = await obtenerNotificacionesGenerales(Number(userId));
                 if (resGenerales.success && resGenerales.data) {
                     const generalesFormateadas = resGenerales.data.map((n: any) => {
-                        // Formateamos la fecha a "21/04/2026, 10:45 AM"
                         const fechaFormateada = new Date(n.created_at).toLocaleString('es-PE', {
                             day: '2-digit', month: '2-digit', year: 'numeric', 
                             hour: '2-digit', minute: '2-digit', hour12: true
                         });
-
                         return {
                             id: `gen-${n.id}`,
-                            // Si el título contiene "Cierre", ponemos un candado, si no, una campana
                             icono: n.title.includes('Cierre') ? '🔒' : '🔔',
                             titulo: n.title,
                             mensaje: n.message,
                             subtexto: fechaFormateada,
-                            resaltado: true // Lo resaltamos porque es una alerta de sistema
+                            resaltado: true 
                         };
                     });
                     bandejaGenérica = [...bandejaGenérica, ...generalesFormateadas];

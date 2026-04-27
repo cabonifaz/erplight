@@ -44,7 +44,7 @@ export async function getCountries() {
   return data.map((item: any) => ({
     id: item.id,
     label: item.description,
-    value: item.description  // Guardamos el nombre del país para el select
+    value: item.description  // Guardamos el nombre del país para el 
   }));
 }
 

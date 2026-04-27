@@ -12,7 +12,7 @@ export default function CalendarioPage() {
     // Estados para subida de Excel
     const [subiendoExcel, setSubiendoExcel] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
-    const anioActual = 2026; // O puedes hacerlo dinámico: new Date().getFullYear()
+    const anioActual = 2026; 
 
     // Estados para el formulario modal manual
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -74,6 +74,9 @@ export default function CalendarioPage() {
         const res = await addHoliday(fecha, descripcion, Number(impacto));
         if (res.success) {
             setIsModalOpen(false);
+            setFecha("");
+            setDescripcion("");
+            setImpacto("1.30");
             cargarFeriados();
         } else alert(res.message);
         setGuardando(false);
@@ -85,15 +88,11 @@ export default function CalendarioPage() {
         if (res.success) cargarFeriados();
     };
 
-    // ✨ NUEVO: Actualizar multiplicador en vivo desde la tabla
     const handleCambiarMultiplicador = async (id: number, nuevoValor: string) => {
-        // Actualizamos visualmente primero para que sea instantáneo (Optimistic UI)
         setFeriados(prev => prev.map(f => f.id === id ? { ...f, multiplier: nuevoValor } : f));
-        // Guardamos en la BD
         await updateHolidayMultiplier(id, Number(nuevoValor));
     };
 
-    // Determina el color del selector según el valor
     const getColorClass = (val: number) => {
         if (val >= 2.0) return "bg-red-50 text-red-700 border-red-200";
         if (val >= 1.5) return "bg-orange-50 text-orange-700 border-orange-200";
@@ -104,7 +103,6 @@ export default function CalendarioPage() {
     return (
         <div className="p-6 w-full max-w-5xl mx-auto space-y-6">
             
-            {/* HEADER Y BOTONES */}
             <div className="border-b border-gray-200 pb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
                     <h1 className="text-3xl font-black text-gray-900 flex items-center gap-2 tracking-tight">
@@ -115,7 +113,6 @@ export default function CalendarioPage() {
                 </div>
                 
                 <div className="flex items-center gap-3">
-                    {/* BOTÓN EXCEL */}
                     <div className="relative">
                         <input type="file" accept=".xlsx, .xls" className="hidden" ref={fileInputRef} onChange={handleFileUpload} />
                         <button 
@@ -137,7 +134,6 @@ export default function CalendarioPage() {
                 </div>
             </div>
 
-            {/* TABLA EDITABLE */}
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
                 <div className="w-full overflow-x-auto">
                     <table className="min-w-full text-left text-sm whitespace-nowrap">
@@ -158,11 +154,10 @@ export default function CalendarioPage() {
                                 feriados.map((f) => (
                                     <tr key={f.id} className="hover:bg-gray-50/50 transition-colors items-center">
                                         <td className="p-4 font-medium text-gray-900">
-                                            {new Date(f.holiday_date).toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' })}
+                                            {new Date(f.holiday_date).toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' })}
                                         </td>
                                         <td className="p-4 font-bold text-gray-700">{f.description}</td>
                                         <td className="p-4">
-                                            {/* ✨ SELECTOR EDITABLE EN VIVO */}
                                             <select 
                                                 value={Number(f.multiplier).toFixed(2)}
                                                 onChange={(e) => handleCambiarMultiplicador(f.id, e.target.value)}
@@ -188,8 +183,62 @@ export default function CalendarioPage() {
                 </div>
             </div>
 
-            {/* MODAL MANUAL (Se mantiene igual, oculto por brevedad pero asume que está aquí) */}
-            {/* ... */}
+            {/* ✨ AQUÍ ESTÁ EL MODAL QUE FALTABA ✨ */}
+            {isModalOpen && (
+                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
+                        <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                            <h2 className="text-lg font-bold text-gray-800">Nuevo Día Festivo</h2>
+                            <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-gray-600 text-xl font-bold">&times;</button>
+                        </div>
+                        <form onSubmit={handleGuardar} className="p-5 space-y-4">
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-1">Fecha</label>
+                                <input 
+                                    type="date" 
+                                    required
+                                    value={fecha}
+                                    onChange={(e) => setFecha(e.target.value)}
+                                    className="w-full border border-gray-300 rounded-lg p-2.5 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-1">Descripción</label>
+                                <input 
+                                    type="text" 
+                                    placeholder="Ej: Día de la Madre"
+                                    required
+                                    value={descripcion}
+                                    onChange={(e) => setDescripcion(e.target.value)}
+                                    className="w-full border border-gray-300 rounded-lg p-2.5 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                />
+                            </div>
+                            <div className="bg-blue-50 border border-blue-100 p-4 rounded-lg">
+                                <label className="block text-sm font-semibold text-blue-900 mb-2 flex items-center gap-1.5">
+                                    <TrendingUp className="w-4 h-4" /> Nivel de Impacto
+                                </label>
+                                <select 
+                                    value={impacto}
+                                    onChange={(e) => setImpacto(e.target.value)}
+                                    className="w-full border border-blue-200 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500 text-blue-800 bg-white"
+                                >
+                                    <option value="1.00">Impacto Nulo (Ventas normales)</option>
+                                    <option value="1.30">Impacto Leve (+30% en ventas)</option>
+                                    <option value="1.50">Impacto Alto (+50% en ventas)</option>
+                                    <option value="2.00">Impacto Extremo (Doble de ventas)</option>
+                                    <option value="3.00">Locura Total (Triple de ventas)</option>
+                                </select>
+                            </div>
+                            <div className="pt-2 flex justify-end gap-2">
+                                <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-100 rounded-lg">Cancelar</button>
+                                <button type="submit" disabled={guardando} className="px-4 py-2 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg disabled:opacity-70">
+                                    {guardando ? 'Guardando...' : 'Guardar Feriado'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

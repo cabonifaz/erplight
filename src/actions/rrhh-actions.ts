@@ -1,15 +1,20 @@
 'use server'
 
-import { pool } from "@/lib/db";
+import { pool } from "@/lib/db"; 
+// Agrega estas líneas debajo de tus otras importaciones:
+import { revalidatePath } from "next/cache";
+import { writeFile, mkdir, unlink } from 'fs/promises'; // ✨ Agregamos unlink para borrar PDFs
+import path from 'path';
 
+
+// ... aquí sigue el resto de tu código ...
+
+// 1. OBTENER EMPLEADOS POR SUCURSAL (SOLO LLAMA AL SP)
 // 1. OBTENER EMPLEADOS POR SUCURSAL (SOLO LLAMA AL SP)
 export async function getEmpleadosPorSucursal(branchId: number) {
     const connection = await pool.getConnection();
     try {
-        // ✨ Cero SQL directo, pura llamada al Procedimiento Almacenado
         const [rows]: any = await connection.query("CALL sp_listar_empleados_sucursal(?)", [branchId]);
-        
-        // rows[0] porque los CALL devuelven la data dentro del primer elemento del array
         return { success: true, data: rows[0] };
     } catch (error: any) {
         console.error("Error al obtener empleados:", error);
@@ -378,6 +383,110 @@ export async function obtenerNotificacionesGenerales(userId: number) {
     } catch (error: any) {
         console.error("Error trayendo notificaciones:", error);
         return { success: false, data: [] };
+    } finally {
+        connection.release();
+    }
+}
+
+// --- NUEVO: OBTENER CONTRATOS ---
+export async function getContratosEmpleado(employeeId: number) {
+    const connection = await pool.getConnection();
+    try {
+        const [rows]: any = await connection.query(
+            "SELECT * FROM employee_contracts WHERE employee_id = ? ORDER BY fecha_vencimiento DESC",
+            [employeeId]
+        );
+        return { success: true, data: rows || [] };
+    } catch (error: any) {
+        return { success: false, message: error.message };
+    } finally {
+        connection.release();
+    }
+}
+
+// --- NUEVO: SUBIR CONTRATO PDF ---
+export async function subirContratoEmpleado(formData: FormData) {
+    const file = formData.get('file') as File;
+    const employeeId = Number(formData.get('employeeId'));
+    const fechaVencimiento = formData.get('fechaVencimiento') as string;
+
+    if (!file || !employeeId || !fechaVencimiento) {
+        return { success: false, message: "Faltan datos requeridos." };
+    }
+
+    const connection = await pool.getConnection();
+    try {
+        // 1. Convertir el archivo a bytes
+        const bytes = await file.arrayBuffer();
+        const buffer = Buffer.from(bytes);
+
+        // 2. Generar un nombre único y preparar la ruta pública
+        const filename = `contrato_${employeeId}_${Date.now()}.pdf`;
+        const uploadDir = path.join(process.cwd(), 'public', 'contratos');
+        
+        // Crear la carpeta si no existe
+        try { await mkdir(uploadDir, { recursive: true }); } catch (e) {}
+
+        const filepath = path.join(uploadDir, filename);
+        
+        // 3. Guardar el PDF físico en el proyecto
+        await writeFile(filepath, buffer);
+        const fileUrl = `/contratos/${filename}`; // Ruta para leer en la web
+
+        const fechaSubida = new Date().toISOString().split('T')[0];
+
+        // 4. Guardar en la base de datos
+        await connection.query(
+            "INSERT INTO employee_contracts (employee_id, file_url, fecha_subida, fecha_vencimiento) VALUES (?, ?, ?, ?)",
+            [employeeId, fileUrl, fechaSubida, fechaVencimiento]
+        );
+
+        revalidatePath('/rrhh');
+        return { success: true, message: "Contrato subido y guardado exitosamente." };
+    } catch (error: any) {
+        console.error("Error subiendo contrato:", error);
+        return { success: false, message: "Error al procesar el archivo en el servidor." };
+    } finally {
+        connection.release();
+    }
+}
+
+// --- ELIMINAR CONTRATO (Físico y Base de Datos) ---
+// --- ELIMINAR CONTRATO (Físico y Base de Datos) ---
+export async function eliminarContratoEmpleado(contratoId: number, fileUrl: string) {
+    const connection = await pool.getConnection();
+    try {
+        // ✨ Llamada limpia al SP
+        await connection.query("CALL sp_eliminar_contrato_empleado(?)", [contratoId]);
+
+        // Intentamos borrar el PDF físico de la carpeta 'public'
+        try {
+            const filepath = path.join(process.cwd(), 'public', fileUrl);
+            await unlink(filepath);
+        } catch (e) {
+            console.log("El archivo físico no existía o ya fue borrado.");
+        }
+
+        revalidatePath('/rrhh');
+        return { success: true, message: "Contrato eliminado correctamente." };
+    } catch (error: any) {
+        return { success: false, message: error.message };
+    } finally {
+        connection.release();
+    }
+}
+
+// --- OBTENER ALERTAS DE CONTRATOS POR VENCER (<= 10 DÍAS) ---
+export async function obtenerNotificacionesContratos() {
+    const connection = await pool.getConnection();
+    try {
+        // ✨ Llamada limpia al SP
+        const [rows]: any = await connection.query("CALL sp_obtener_alertas_contratos()");
+        
+        // rows[0] porque los CALL devuelven la data dentro del primer elemento
+        return { success: true, data: rows[0] };
+    } catch (error: any) {
+        return { success: false, message: error.message };
     } finally {
         connection.release();
     }
