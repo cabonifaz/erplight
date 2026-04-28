@@ -142,3 +142,42 @@ export async function saveApprovalLimit(userId: number, userName: string, limitA
         return { success: false, message: error.sqlMessage || error.message };
     }
 }
+
+// Añade bcrypt a tus imports arriba si no lo tienes:
+// import bcrypt from "bcryptjs";
+// import { pool } from "@/lib/db";
+// import { revalidatePath } from "next/cache";
+
+// --- CAMBIAR CONTRASEÑA DE CUALQUIER USUARIO (SOLO ADMIN/GERENTE) ---
+export async function adminCambiarPassword(userId: number, nuevaPassword: string) {
+    const connection = await pool.getConnection();
+    try {
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(nuevaPassword, salt);
+
+        await connection.query("CALL sp_admin_cambiar_password_usuario(?, ?)", [userId, hashedPassword]);
+        revalidatePath('/usuarios');
+        return { success: true, message: "Contraseña actualizada correctamente." };
+    } catch (error: any) {
+        console.error("Error al cambiar contraseña de usuario:", error);
+        return { success: false, message: "Error al actualizar la contraseña." };
+    } finally {
+        connection.release();
+    }
+}
+
+// --- HABILITAR / DESHABILITAR USUARIO ---
+export async function adminToggleEstadoUsuario(userId: number, nuevoEstado: number) {
+    const connection = await pool.getConnection();
+    try {
+        await connection.query("CALL sp_admin_toggle_estado_usuario(?, ?)", [userId, nuevoEstado]);
+        revalidatePath('/usuarios');
+        const estadoTexto = nuevoEstado === 1 ? 'habilitado' : 'deshabilitado';
+        return { success: true, message: `Usuario ${estadoTexto} correctamente.` };
+    } catch (error: any) {
+        console.error("Error al cambiar estado de usuario:", error);
+        return { success: false, message: "Error al cambiar el estado." };
+    } finally {
+        connection.release();
+    }
+}

@@ -1,31 +1,17 @@
 'use client'
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
+import Image from "next/image"; // ✨ IMPORTAMOS EL COMPONENTE DE IMAGEN DE NEXT.JS
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { 
-  LayoutDashboard, 
-  ShoppingCart, 
-  Package, 
-  Users, 
-  Settings, 
-  FileText,
-  Truck,
-  ClipboardList,
-  Search,
-  Building, 
-  UserCog,
-  ChevronDown, 
-  Upload,       
-  History,
-  TrendingUp, 
-  BarChart, 
-  Globe, 
-  CalendarDays,
-  Building2,
-  Briefcase
+  LayoutDashboard, ShoppingCart, Package, Users, Settings, FileText,
+  Truck, ClipboardList, Search, Building, UserCog, ChevronDown, 
+  Upload, History, TrendingUp, BarChart, Globe, CalendarDays,
+  Building2, Briefcase
 } from "lucide-react";
+import { getLogoUrl } from "@/actions/client-actions"; // ✨ IMPORTAMOS LA ACCIÓN QUE CREASTE
 
 interface MenuItem {
   label: string;
@@ -77,12 +63,23 @@ export function Sidebar({ user }: { user?: any }) {
   const pathname = usePathname();
   const [searchTerm, setSearchTerm] = useState("");
   const [openMenus, setOpenMenus] = useState<Record<string, boolean>>({ "Ventas & OC": true });
+  const [logoUrl, setLogoUrl] = useState<string>(""); // ✨ ESTADO PARA GUARDAR LA URL DEL LOGO
+
+  // ✨ AL CARGAR EL SIDEBAR, BUSCAMOS LA URL EN LA BD
+  useEffect(() => {
+      const fetchLogo = async () => {
+          const res = await getLogoUrl();
+          if (res.success && res.url) {
+              setLogoUrl(res.url);
+          }
+      };
+      fetchLogo();
+  }, []);
 
   const toggleMenu = (label: string) => {
     setOpenMenus(prev => ({ ...prev, [label]: !prev[label] }));
   };
 
-  // ✨ AQUÍ ESTÁ LA MAGIA: Convertimos Configuración en un Dropdown
   const adminItems: MenuItem[] = [
     { href: "/sucursales", label: "Sucursales", icon: Building },
     { href: "/usuarios", label: "Usuarios", icon: UserCog },
@@ -117,8 +114,20 @@ export function Sidebar({ user }: { user?: any }) {
   return (
     <aside className="w-64 bg-white border-r border-gray-200 hidden md:flex flex-col h-screen fixed left-0 top-0 z-10">
       
-      <div className="h-16 flex items-center px-6 border-b border-gray-200">
-        <span className="text-xl font-bold text-blue-700">GTERP Light</span>
+      {/* ✨ AQUÍ REEMPLAZAMOS EL TEXTO POR LA IMAGEN DINÁMICA */}
+      <div className="h-16 flex items-center justify-center px-4 border-b border-gray-200">
+          {logoUrl ? (
+              <Image 
+                  src={logoUrl} 
+                  alt="Logo Empresa" 
+                  width={200}         // Le damos más ancho permitido
+                  height={55}         // Le damos más alto permitido
+                  className="object-contain max-h-[60px] w-auto" // Dejamos que ocupe casi todos los 64px del contenedor
+                  priority 
+              />
+          ) : (
+              <span className="text-xl font-bold text-blue-700"></span>
+          )}
       </div>
       
       <div className="p-3 pb-0">

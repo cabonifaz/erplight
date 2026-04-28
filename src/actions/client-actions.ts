@@ -212,3 +212,19 @@ export async function deleteClient(clientId: number) {
     return { success: false, message: "Error al eliminar el cliente" };
   }
 }
+
+export async function getLogoUrl() {
+    const connection = await pool.getConnection();
+    try {
+        // ✨ Cero SQL directo, solo invocamos al SP
+        const [rows]: any = await connection.query("CALL sp_obtener_logo_empresa()");
+        
+        // rows[0][0] porque el CALL envuelve el resultado en un array adicional
+        return { success: true, url: rows[0][0]?.description || '' };
+    } catch (error: any) {
+        console.error("Error obteniendo logo:", error);
+        return { success: false, url: '' };
+    } finally {
+        connection.release();
+    }
+}

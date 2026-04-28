@@ -231,9 +231,9 @@ export function InventoryHistoryDialog({
                                                             </div>
                                                         ) : (
                                                             <div className="flex flex-col gap-1">
-                                                                <span className="font-semibold text-gray-700 flex items-center gap-1"><AlertCircle className="w-3.5 h-3.5 text-orange-500" />{mov.concept || 'AJUSTE'}</span>
-                                                                <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded w-fit italic">"{mov.document_number || mov.guide_number || 'Sin motivo'}"</span>
-                                                            </div>
+    <span className="font-semibold text-gray-700 flex items-center gap-1"><AlertCircle className="w-3.5 h-3.5 text-orange-500" />{mov.concept || 'AJUSTE'}</span>
+    <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded w-fit italic">"{mov.description || mov.document_number || mov.guide_number || 'Sin motivo'}"</span>
+</div>
                                                         )}
                                                     </TableCell>
 

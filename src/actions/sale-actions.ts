@@ -3,6 +3,7 @@
 import { pool } from "@/lib/db";
 import { auth } from "@/auth";
 import { revalidatePath } from "next/cache";
+
 // --- 1. FUNCIÓN DE VALIDACIÓN ---
 export async function validateExcelSales(payload: { data: any[], branchId: number }) {
     const session = await auth();
@@ -16,12 +17,20 @@ export async function validateExcelSales(payload: { data: any[], branchId: numbe
     const connection = await pool.getConnection();
 
     try {
-        // ✨ EXTRAEMOS FECHAS Y TICKETS DEL EXCEL
+        // ✨ EXTRAEMOS FECHAS Y TICKETS DEL EXCEL (Con el nuevo formato seguro)
         const fechasEnExcel = [...new Set(ventasData.map(fila => {
-            const fechaRaw = fila['Fecha'];
+            const fechaRaw = fila['Fecha'] || fila['fecha'];
             if (!fechaRaw) return null;
-            // Extrae solo la parte de la fecha (Ej: de "01/11/2025 09:28" saca "01/11/2025")
-            return String(fechaRaw).split(' ')[0]; 
+            
+            // Usamos la misma lógica robusta para la validación
+            const dateObj = new Date(fechaRaw);
+            if (!isNaN(dateObj.getTime())) {
+                 const yyyy = dateObj.getFullYear();
+                 const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+                 const dd = String(dateObj.getDate()).padStart(2, '0');
+                 return `${yyyy}-${mm}-${dd}`;
+            }
+            return null;
         }).filter(Boolean))];
 
         const ticketsEnExcel = [...new Set(ventasData.map(fila => 
@@ -40,7 +49,7 @@ export async function validateExcelSales(payload: { data: any[], branchId: numbe
                     mensaje: `El Excel contiene ventas de un día que ya tiene el CIERRE DIARIO ENVIADO. No se permiten cargar modificaciones ni ventas nuevas para fechas cerradas.`, 
                     tipo: 'error' 
                 });
-                return { success: true, issues, canProceed: false }; // Bloqueamos la ejecución
+                return { success: true, issues, canProceed: false }; 
             }
         }
 
@@ -55,7 +64,7 @@ export async function validateExcelSales(payload: { data: any[], branchId: numbe
                 issues.push({ 
                     producto: "⚠️ CORRECCIÓN DE VENTAS", 
                     mensaje: `Se detectaron boletas existentes (Ej: ${ejemplos}...). Se realizará una corrección automática: el inventario anterior se devolverá y se reemplazarán con los datos de este nuevo Excel.`, 
-                    tipo: 'warning' // NOTA: Es warning. Dejamos que 'canProceed' siga siendo true
+                    tipo: 'warning' 
                 });
             }
         }
@@ -156,9 +165,9 @@ export async function processExcelSales(payload: { data: any[], branchId: number
 
     try {
         const ventasAgrupadas = new Map();
-        const nombresUnicos = new Set<string>(); // Guardaremos los nombres para buscarlos de golpe
+        const nombresUnicos = new Set<string>(); 
 
-        // --- BUCLE 1: TU LÓGICA ORIGINAL (Se queda intacta) ---
+        // --- BUCLE 1: TU LÓGICA ORIGINAL ---
         for (const fila of ventasData) {
             const findValue = (keywords: string[]) => {
                 const exactKey = Object.keys(fila).find(k => 
@@ -183,44 +192,34 @@ export async function processExcelSales(payload: { data: any[], branchId: number
             const docType = findValue(['tipo de documento']) || 'Ticket';
             const clientDoc = String(findValue(['cliente / ruc / dni']) || '');
 
-            let rawFecha = findValue(['fecha']);
+            // ✨ NUEVA LÓGICA DE FECHAS A PRUEBA DE FALLOS ✨
             let fechaExcelFormateada = null;
+            const fechaRaw = findValue(['fecha']);
 
-            if (rawFecha) {
-                if (rawFecha instanceof Date) {
-                    const tzOffset = rawFecha.getTimezoneOffset() * 60000;
-                    fechaExcelFormateada = new Date(rawFecha.getTime() - tzOffset).toISOString().slice(0, 19).replace('T', ' ');
-                } else {
-                    let strFecha = String(rawFecha).trim();
-                    if (strFecha.includes('T') && strFecha.includes('Z')) {
-                        const dateObj = new Date(strFecha);
-                        const tzOffset = dateObj.getTimezoneOffset() * 60000;
-                        fechaExcelFormateada = new Date(dateObj.getTime() - tzOffset).toISOString().slice(0, 19).replace('T', ' ');
-                    } else if (strFecha.includes('/')) {
-                        const [fechaStr, horaStr = '00:00:00'] = strFecha.split(' ');
-                        const partes = fechaStr.split('/');
-                        if (partes.length === 3) {
-                            let p1 = Number(partes[0]);
-                            let p2 = Number(partes[1]);
-                            let anio = partes[2];
-                            let dia, mes;
-
-                            if (p1 === 4 && p2 === 10) { mes = '04'; dia = '10'; }
-                            else if (p1 === 10 && p2 === 4) { mes = '04'; dia = '10'; }
-                            else { dia = String(p1).padStart(2, '0'); mes = String(p2).padStart(2, '0'); }
-
-                            const horaF = horaStr.length === 5 ? `${horaStr}:00` : horaStr;
-                            fechaExcelFormateada = `${anio}-${mes}-${dia} ${horaF}`;
-                        }
-                    } else if (!isNaN(Number(strFecha))) {
-                        const numFecha = Number(strFecha);
-                        const dias = numFecha - 25569;
-                        const fechaLocal = new Date((dias * 86400 * 1000) + (new Date().getTimezoneOffset() * 60000));
-                        fechaExcelFormateada = fechaLocal.toISOString().slice(0, 19).replace('T', ' ');
+            if (fechaRaw) {
+                // 1. Si Excel lo mandó como número serial de días (muy común)
+                if (typeof fechaRaw === 'number') {
+                    const dias = fechaRaw - 25569;
+                    const fechaLocal = new Date((dias * 86400 * 1000) + (new Date().getTimezoneOffset() * 60000));
+                    fechaExcelFormateada = fechaLocal.toISOString().slice(0, 19).replace('T', ' ');
+                } 
+                // 2. Si Excel lo mandó como texto ("4/27/26", "2026-04-27", etc.)
+                else {
+                    const dateObj = new Date(fechaRaw);
+                    if (!isNaN(dateObj.getTime())) {
+                        const yyyy = dateObj.getFullYear();
+                        const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+                        const dd = String(dateObj.getDate()).padStart(2, '0');
+                        const hh = String(dateObj.getHours()).padStart(2, '0');
+                        const min = String(dateObj.getMinutes()).padStart(2, '0');
+                        const ss = String(dateObj.getSeconds()).padStart(2, '0');
+                        
+                        fechaExcelFormateada = `${yyyy}-${mm}-${dd} ${hh}:${min}:${ss}`; 
                     }
                 }
             }
 
+            // Fallback: Si todo falla, usa la fecha actual
             if (!fechaExcelFormateada) {
                 const now = new Date();
                 const tzOffset = now.getTimezoneOffset() * 60000; 
@@ -246,7 +245,7 @@ export async function processExcelSales(payload: { data: any[], branchId: number
 
             if (nombreProducto) {
                 const productoYaExiste = grupo.detalles.find((d: any) => d.nombre === nombreProducto);
-                nombresUnicos.add(nombreProducto); // Guardamos para buscar su ID luego
+                nombresUnicos.add(nombreProducto); 
                 
                 if (!productoYaExiste) {
                     grupo.detalles.push({ nombre: nombreProducto, cantidad: cantidad, valorTotal: valorFila });
@@ -260,7 +259,6 @@ export async function processExcelSales(payload: { data: any[], branchId: number
         // --- BUCLE 2 OPTIMIZADO: Mapeo de IDs y Creación de JSON ---
         await connection.beginTransaction();
 
-        // 2.1: Buscamos los IDs de los 5 o 10 productos una sola vez, en lugar de 1500 veces
         const catalogo = new Map();
         for (const nombre of Array.from(nombresUnicos)) {
             const [itemResult]: any = await connection.query("CALL sp_buscar_item_venta(?)", [nombre]);
@@ -269,7 +267,6 @@ export async function processExcelSales(payload: { data: any[], branchId: number
             catalogo.set(nombre, { id: itemRow.item_id, tipo: itemRow.tipo });
         }
 
-        // 2.2: Construimos un Array plano con toda la información
         const jsonFilas = [];
         for (const [ticketId, data] of ventasAgrupadas.entries()) {
             const metodoPagoFinal = Array.from(data.metodos).join(" + ");
@@ -283,7 +280,7 @@ export async function processExcelSales(payload: { data: any[], branchId: number
                     client_doc: data.clientDoc,
                     metodo_pago: metodoPagoFinal,
                     total_cabecera: data.totalVenta,
-                    tipo_item: itemDb.tipo, // 'MENU' o 'PRODUCTO'
+                    tipo_item: itemDb.tipo, 
                     item_id: itemDb.id,
                     cantidad: detalle.cantidad,
                     precio_uni: detalle.valorTotal / detalle.cantidad,
@@ -292,7 +289,6 @@ export async function processExcelSales(payload: { data: any[], branchId: number
             }
         }
 
-        // 2.3: Mandamos los 1500 registros en 1 SOLA LLAMADA a la base de datos
         const datosVentasJson = JSON.stringify(jsonFilas);
         await connection.query("CALL sp_procesar_excel_masivo(?, ?, ?)", [branchId, userId, datosVentasJson]);
 
@@ -333,8 +329,6 @@ export async function getReporteVentas(filtros: {
     }
 }
 
-// En src/actions/sale-actions.ts
-
 export async function obtenerHistorialCargas() {
     const connection = await pool.getConnection();
     try {
@@ -348,14 +342,10 @@ export async function obtenerHistorialCargas() {
     }
 }
 
-// Agrégalo en tu archivo de acciones (ej. src/actions/sale-actions.ts)
 export async function obtenerLimiteDiasReporte() {
     const connection = await pool.getConnection();
     try {
-        // Llamada limpia al SP
         const [rows]: any = await connection.query("CALL sp_obtener_configuracion_numerica('MAX_DIAS_REPORTE')");
-        
-        // Si por alguna razón borran el registro, por defecto será 31
         const limite = rows[0][0]?.valor || 31; 
         
         return { success: true, maxDias: limite };

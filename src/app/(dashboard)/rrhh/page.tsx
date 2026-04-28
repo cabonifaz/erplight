@@ -9,6 +9,8 @@ import {
     obtenerEstadoAsistencia, obtenerSucursales, obtenerDisponibilidad, 
     guardarDisponibilidad, autogenerarHorarioSemana, publicarHorariosSemana, 
     eliminarHorarioEmpleado, obtenerReporteHoras,
+    // ✨ IMPORTAMOS LA NUEVA FUNCIÓN DEL DETALLE DE HORAS
+    obtenerDetalleHorasEmpleado,
     // ✨ IMPORTAMOS LAS NUEVAS FUNCIONES DE CONTRATOS (Incluyendo eliminar)
     getContratosEmpleado, subirContratoEmpleado, eliminarContratoEmpleado 
 } from '@/actions/rrhh-actions';
@@ -63,6 +65,12 @@ export default function RRHHPage() {
     const [nuevoContratoFecha, setNuevoContratoFecha] = useState('');
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [subiendoContrato, setSubiendoContrato] = useState(false); 
+
+    // ✨ ESTADOS PARA EL MÓDULO DE DETALLE DE HORAS (Drill-down)
+    const [isDetalleModalOpen, setIsDetalleModalOpen] = useState(false);
+    const [detalleEmpSeleccionado, setDetalleEmpSeleccionado] = useState<any>(null);
+    const [detalleHoras, setDetalleHoras] = useState<any[]>([]);
+    const [cargandoDetalle, setCargandoDetalle] = useState(false);
 
     const diasDeLaSemana = Array.from({ length: 7 }).map((_, i) => {
         const d = new Date(semanaActual);
@@ -350,21 +358,32 @@ export default function RRHHPage() {
         setSubiendoContrato(false);
     };
 
-    // ✨ NUEVA FUNCIÓN: ELIMINAR CONTRATO
+    // ✨ ELIMINAR CONTRATO
     const handleEliminarContrato = async (idContrato: number, urlArchivo: string) => {
         if (!confirm("¿Seguro que deseas eliminar este contrato? Esta acción no se puede deshacer.")) return;
         
         const res = await eliminarContratoEmpleado(idContrato, urlArchivo);
         if (res.success) {
-            // Actualizar la lista en el modal
             const listRes = await getContratosEmpleado(contratoEmp.id);
             if (listRes.success) setContratosLista(listRes.data);
-            
-            // Actualizar la lista principal por si cambia la alerta de "Vence pronto"
             cargarDatosSucursal(); 
         } else {
             alert("❌ Error al eliminar: " + res.message);
         }
+    };
+
+    // ✨ ABRIR MODAL DETALLE DE HORAS
+    const handleAbrirDetalle = async (emp: any) => {
+        setDetalleEmpSeleccionado(emp);
+        setIsDetalleModalOpen(true);
+        setCargandoDetalle(true);
+        
+        // Asumiendo que el reporte devuelve el ID del empleado como 'employee_id' o 'id'
+        const idEmpleado = emp.employee_id || emp.id; 
+        
+        const res = await obtenerDetalleHorasEmpleado(idEmpleado, reporteInicio, reporteFin);
+        if (res.success) setDetalleHoras(res.data);
+        setCargandoDetalle(false);
     };
 
     if (status === 'loading') return <div className="min-h-[60vh] flex justify-center items-center font-bold text-gray-500">Cargando credenciales...</div>;
@@ -613,7 +632,16 @@ export default function RRHHPage() {
                                                 <td className="p-4 font-bold text-gray-800">{row.nombre_completo}</td>
                                                 <td className="p-4 text-center text-gray-600 font-mono">{row.numero_documento}</td>
                                                 <td className="p-4 text-center"><span className="bg-gray-100 border border-gray-200 text-gray-700 px-3 py-1 rounded-md text-xs font-bold">{row.cargo}</span></td>
-                                                <td className="p-4 text-center font-black text-xl text-blue-600">{row.total_horas} <span className="text-sm font-bold text-gray-400">hrs</span></td>
+                                                <td className="p-4 text-center font-black text-xl text-blue-600 flex items-center justify-center gap-3">
+                                                    <span>{row.total_horas} <span className="text-sm font-bold text-gray-400">hrs</span></span>
+                                                    <button 
+                                                        onClick={() => handleAbrirDetalle(row)} 
+                                                        className="text-sm bg-blue-100 hover:bg-blue-200 text-blue-700 py-1 px-2 rounded-md transition-colors"
+                                                        title="Ver desglose diario"
+                                                    >
+                                                         Ver Detalle
+                                                    </button>
+                                                </td>
                                             </tr>
                                         ))
                                     )}
@@ -782,7 +810,6 @@ export default function RRHHPage() {
                             <button onClick={() => setIsContratoModalOpen(false)} className="text-gray-400 hover:text-gray-600 text-2xl font-bold">&times;</button>
                         </div>
 
-                        {/* Formulario de Subida Real */}
                         <div className="bg-purple-50 p-4 rounded-lg border border-purple-100 mb-6">
                             <h4 className="text-sm font-bold text-purple-800 mb-3">Subir Nuevo Contrato</h4>
                             <div className="flex flex-col sm:flex-row gap-4 items-end">
@@ -814,7 +841,6 @@ export default function RRHHPage() {
                             </div>
                         </div>
 
-                        {/* Historial de Contratos Actualizado con Botón Eliminar */}
                         <div className="overflow-x-auto border border-gray-200 rounded-lg">
                             <table className="min-w-full text-left text-sm whitespace-nowrap">
                                 <thead className="bg-gray-100 border-b border-gray-200">
@@ -853,6 +879,61 @@ export default function RRHHPage() {
                                     )}
                                 </tbody>
                             </table>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* -------------------- MODAL: DETALLE DE HORAS -------------------- */}
+            {isDetalleModalOpen && (
+                <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[100] p-4">
+                    <div className="bg-white p-0 rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[85vh]">
+                        <div className="bg-blue-900 p-5 text-white">
+                            <div className="flex justify-between items-center">
+                                <h3 className="text-xl font-bold">Desglose de Horas</h3>
+                                <button onClick={() => setIsDetalleModalOpen(false)} className="text-blue-200 hover:text-white text-2xl font-bold">&times;</button>
+                            </div>
+                            <p className="text-sm text-blue-200 mt-1 font-medium">{detalleEmpSeleccionado?.nombre_completo}</p>
+                            <p className="text-xs text-blue-300 mt-1">Del {reporteInicio} al {reporteFin}</p>
+                        </div>
+
+                        <div className="p-0 overflow-y-auto flex-1 bg-gray-50">
+                            {cargandoDetalle ? (
+                                <div className="p-10 text-center text-gray-500 font-bold">Cargando voucher de horas...</div>
+                            ) : detalleHoras.length === 0 ? (
+                                <div className="p-10 text-center text-gray-500 font-bold">No hay registros detallados en estas fechas.</div>
+                            ) : (
+                                <table className="min-w-full text-left text-sm whitespace-nowrap bg-white">
+                                    <thead className="bg-gray-100 sticky top-0 border-b border-gray-200 shadow-sm">
+                                        <tr>
+                                            <th className="p-3 font-bold text-gray-600">Fecha</th>
+                                            <th className="p-3 font-bold text-gray-600 text-center">Turno</th>
+                                            <th className="p-3 font-bold text-gray-600 text-right">Horas</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-100">
+                                        {detalleHoras.map((dia, idx) => (
+                                            <tr key={idx} className="hover:bg-blue-50 transition-colors">
+                                                <td className="p-3 font-medium text-gray-800 capitalize">
+                                                    {new Date(dia.fecha).toLocaleDateString('es-PE', { weekday: 'short', day: '2-digit', month: 'short' })}
+                                                </td>
+                                                <td className="p-3 text-center text-gray-600 font-mono text-xs bg-gray-50">
+                                                    {dia.hora_inicio} - {dia.hora_fin}
+                                                </td>
+                                                <td className="p-3 text-right font-black text-blue-600">
+                                                    {dia.horas_totales} <span className="text-[10px] text-gray-400">h</span>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            )}
+                        </div>
+                        <div className="bg-white p-4 border-t border-gray-200 flex justify-between items-center">
+                            <span className="text-sm font-bold text-gray-500">Total Auditado:</span>
+                            <span className="text-xl font-black text-blue-800">
+                                {detalleHoras.reduce((acc, curr) => acc + Number(curr.horas_totales), 0).toFixed(2)} hrs
+                            </span>
                         </div>
                     </div>
                 </div>

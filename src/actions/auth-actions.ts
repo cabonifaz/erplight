@@ -1,33 +1,29 @@
 'use server'
 
-import { signIn } from "@/auth";
+import { signIn, auth } from "@/auth";
 import { AuthError } from "next-auth";
-import { pool } from "@/lib/db"; // ✨ Importamos la conexión a tu base de datos
+import { pool } from "@/lib/db";
+import bcrypt from "bcryptjs"; // ✨ Asegúrate de tener instalado bcryptjs
+import { revalidatePath } from "next/cache";
 
+// --- 1. ACCIÓN PARA INICIAR SESIÓN (LOGIN) ---
 export async function authenticate(prevState: string | undefined, formData: FormData) {
   try {
-    const remember = formData.get('remember') === 'on';
-    
-    // Asumimos que el input de tu formulario se llama 'email'. 
-    // Si se llama diferente, cámbialo aquí.
     const email = formData.get('email') as string; 
+    let rutaDestino = '/dashboard'; // Ruta por defecto
     
-    let rutaDestino = '/dashboard'; // Ruta por defecto para Gerentes, Admins, etc.
-    
-// ✨ 1. VERIFICAR EL ROL ANTES DEL LOGIN
+    // VERIFICAR EL ROL ANTES DEL LOGIN PARA REDIRECCIÓN
     if (email) {
         const connection = await pool.getConnection();
         try {
-            // Reemplazamos el SQL crudo por el Procedimiento Almacenado
             const [results]: any = await connection.query(
                 "CALL sp_obtener_rol_usuario(?)", 
                 [email]
             );
             
-            // Extraemos el primer set de resultados que devuelve el SP
             const users = results[0];
             
-            // Si el usuario existe y es el MARCADOR, cambiamos su destino
+            // Si el usuario es el MARCADOR, lo mandamos a su pantalla especial
             if (users && users.length > 0 && users[0].role === 'MARCADOR') {
                 rutaDestino = '/marcador';
             }
@@ -38,11 +34,10 @@ export async function authenticate(prevState: string | undefined, formData: Form
         }
     }
 
-    // ✨ 2. INYECTAR LA REDIRECCIÓN A NEXTAUTH
-    // NextAuth v5 detecta automáticamente este parámetro en el formData
+    // Inyectamos la ruta de destino en el formData para NextAuth
     formData.append('redirectTo', rutaDestino);
 
-    // 3. INICIAR SESIÓN
+    // Intentar inicio de sesión
     await signIn('credentials', formData);
 
   } catch (error) {
@@ -54,8 +49,58 @@ export async function authenticate(prevState: string | undefined, formData: Form
           return 'Ocurrió un error inesperado. Intenta de nuevo.';
       }
     }
-    // Importante: Next.js usa un error de tipo "Redirect" para navegar al dashboard.
-    // Debemos relanzar el error si no es de tipo AuthError.
     throw error; 
   }
+}
+
+// --- 2. NUEVA: ACCIÓN PARA CAMBIAR CONTRASEÑA (DESDE EL PERFIL) ---
+export async function cambiarPasswordUsuario(passwordActual: string, nuevaPassword: string) {
+    const session = await auth();
+    
+    // Verificación de seguridad básica
+    if (!session?.user?.id) {
+        return { success: false, message: "No autorizado. Inicia sesión nuevamente." };
+    }
+
+    const userId = session.user.id;
+    const connection = await pool.getConnection();
+
+    try {
+        // 1. Obtener la contraseña actual encriptada de la base de datos
+        const [rows]: any = await connection.query(
+            "SELECT password FROM users WHERE id = ?", 
+            [userId]
+        );
+
+        if (rows.length === 0) {
+            return { success: false, message: "Usuario no encontrado." };
+        }
+
+        const passwordDB = rows[0].password;
+
+        // 2. Comparar la contraseña ingresada con la de la BD usando bcrypt
+        const esCorrecta = await bcrypt.compare(passwordActual, passwordDB);
+
+        if (!esCorrecta) {
+            return { success: false, message: "La contraseña actual es incorrecta." };
+        }
+
+        // 3. Encriptar la NUEVA contraseña
+        const salt = await bcrypt.genSalt(10);
+        const nuevaPasswordHasheada = await bcrypt.hash(nuevaPassword, salt);
+
+        // 4. Guardar en la base de datos usando tu Procedimiento Almacenado
+        await connection.query(
+            "CALL sp_actualizar_password(?, ?)", 
+            [userId, nuevaPasswordHasheada]
+        );
+
+        return { success: true, message: "¡Tu contraseña ha sido actualizada con éxito!" };
+
+    } catch (error: any) {
+        console.error("Error al cambiar contraseña:", error);
+        return { success: false, message: "Error interno al procesar el cambio." };
+    } finally {
+        connection.release();
+    }
 }

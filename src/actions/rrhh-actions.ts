@@ -491,3 +491,20 @@ export async function obtenerNotificacionesContratos() {
         connection.release();
     }
 }
+
+// --- OBTENER EL DESGLOSE DIARIO DE HORAS DE UN EMPLEADO ---
+export async function obtenerDetalleHorasEmpleado(employeeId: number, startDate: string, endDate: string) {
+    const connection = await pool.getConnection();
+    try {
+        const [rows]: any = await connection.query(
+            "CALL sp_rrhh_reporte_horas_detalle(?, ?, ?)", 
+            [employeeId, startDate, endDate]
+        );
+        return { success: true, data: rows[0] || [] };
+    } catch (error: any) {
+        console.error("Error obteniendo detalle de horas:", error);
+        return { success: false, message: error.message };
+    } finally {
+        connection.release();
+    }
+}

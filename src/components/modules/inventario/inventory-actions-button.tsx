@@ -23,6 +23,11 @@ export function InventoryActionsButton({
     const [isLoading, setIsLoading] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
+    // ✨ Estados para la justificación del Excel
+    const [justificationModalOpen, setJustificationModalOpen] = useState(false);
+    const [justificationText, setJustificationText] = useState("");
+    const [selectedFile, setSelectedFile] = useState<File | null>(null);
+
     const rolesPermitidosExcel = ['GERENTE GENERAL', 'GERENTE DE LOGISTICA', 'ADMINISTRADOR GENERAL'];
     const puedeSubirExcel = rolesPermitidosExcel.includes(userRole.toUpperCase());
 
@@ -30,7 +35,8 @@ export function InventoryActionsButton({
         userBranchId || (branches && branches.length > 0 ? branches[0].id : 0)
     );
 
-    const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Paso 1: Atrapamos el archivo pero NO lo procesamos aún
+    const handleFileSelection = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
 
@@ -40,9 +46,23 @@ export function InventoryActionsButton({
             return;
         }
 
-        setIsLoading(true);
-        const reader = new FileReader();
+        // Guardamos el archivo en memoria y abrimos el Modal
+        setSelectedFile(file);
+        setJustificationText("");
+        setJustificationModalOpen(true);
+    };
 
+    // Paso 2: Procesamos cuando el usuario ingresa el motivo y confirma
+    const handleConfirmUpload = () => {
+        if (!justificationText.trim()) {
+            alert("⚠️ La justificación es obligatoria por motivos de auditoría.");
+            return;
+        }
+
+        setJustificationModalOpen(false);
+        setIsLoading(true);
+
+        const reader = new FileReader();
         reader.onload = async (evt) => {
             try {
                 const bstr = evt.target?.result;
@@ -55,9 +75,11 @@ export function InventoryActionsButton({
                     return;
                 }
 
+                // ✨ Enviamos la justificación al Backend
                 const result = await procesarAjusteInventarioExcel({
                     branchId: Number(excelBranchId),
-                    data: data
+                    data: data,
+                    justificacion: justificationText 
                 });
 
                 if (result.success) {
@@ -76,10 +98,20 @@ export function InventoryActionsButton({
                 alert("Error al leer el archivo Excel.");
             } finally {
                 setIsLoading(false);
+                setSelectedFile(null);
                 if (fileInputRef.current) fileInputRef.current.value = ""; 
             }
         };
-        reader.readAsBinaryString(file);
+        
+        if (selectedFile) {
+            reader.readAsBinaryString(selectedFile);
+        }
+    };
+
+    const handleCancelUpload = () => {
+        setJustificationModalOpen(false);
+        setSelectedFile(null);
+        if (fileInputRef.current) fileInputRef.current.value = ""; 
     };
 
     return (
@@ -116,7 +148,7 @@ export function InventoryActionsButton({
                             accept=".xlsx, .xls"
                             className="hidden"
                             ref={fileInputRef}
-                            onChange={handleFileUpload}
+                            onChange={handleFileSelection}
                             disabled={isLoading}
                         />
                         
@@ -128,13 +160,49 @@ export function InventoryActionsButton({
                             className="h-7 px-3 text-xs font-bold bg-white text-purple-700 border-purple-200 hover:bg-purple-100 hover:text-purple-800 transition-all disabled:opacity-50"
                         >
                             {isLoading ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <UploadCloud className="w-3.5 h-3.5 mr-1.5" />}
-                            {isLoading ? "Validando..." : "Subir Excel"}
+                            {isLoading ? "Procesando..." : "Subir Excel"}
                         </Button>
                     </div>
                 )}
             </div>
 
-            {/* ✨ MODAL RESTAURADO FUERA DEL DIV FLEX ✨ */}
+            {/* ✨ MODAL DE JUSTIFICACIÓN DE AUDITORÍA ✨ */}
+            {justificationModalOpen && (
+                <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4">
+                    <div className="bg-white rounded-xl shadow-2xl max-w-md w-full overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                        <div className="bg-purple-600 p-4 text-white">
+                            <h3 className="font-bold text-lg flex items-center gap-2">
+                                <UploadCloud className="w-5 h-5" /> 
+                                Justificación de Auditoría
+                            </h3>
+                            <p className="text-purple-100 text-sm mt-1">
+                                Estás a punto de cargar un archivo Excel ({selectedFile?.name}). Se requiere un motivo.
+                            </p>
+                        </div>
+                        <div className="p-6">
+                            <label className="block text-sm font-bold text-gray-700 mb-2">
+                                Motivo de la carga masiva:
+                            </label>
+                            <textarea 
+                                rows={3}
+                                placeholder="Ej: Inventario físico de fin de mes, regularización general, etc."
+                                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none resize-none"
+                                value={justificationText}
+                                onChange={(e) => setJustificationText(e.target.value)}
+                            />
+                            <div className="mt-6 flex justify-end gap-3">
+                                <Button type="button" variant="outline" onClick={handleCancelUpload}>
+                                    Cancelar
+                                </Button>
+                                <Button type="button" className="bg-purple-600 hover:bg-purple-700" onClick={handleConfirmUpload}>
+                                    Confirmar y Cargar
+                                </Button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             <ManualEntryDialog 
                 open={open} 
                 onOpenChange={setOpen} 

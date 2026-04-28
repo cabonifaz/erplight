@@ -1,13 +1,21 @@
 'use client'
 
 import { useState } from "react";
-import { createUser } from "@/actions/admin-actions";
+// ✨ Asegúrate de importar las dos nuevas acciones:
+import { createUser, adminCambiarPassword, adminToggleEstadoUsuario } from "@/actions/admin-actions";
 import { toast } from "sonner"; 
+import { Lock, UserX, UserCheck } from "lucide-react"; // ✨ Nuevos íconos
 
 export default function UsuariosClient({ users, branches }: { users: any[], branches: any[] }) {
     const [role, setRole] = useState("ADMIN_SUCURSAL");
     const [selectedBranches, setSelectedBranches] = useState<number[]>([]);
     const [loading, setLoading] = useState(false);
+
+    // ✨ Estados para el modal de cambio de contraseña del admin
+    const [isPassModalOpen, setIsPassModalOpen] = useState(false);
+    const [targetUser, setTargetUser] = useState<any>(null);
+    const [newAdminPass, setNewAdminPass] = useState("");
+    const [loadingAction, setLoadingAction] = useState(false);
 
     const handleCheckboxChange = (branchId: number) => {
         setSelectedBranches(prev => 
@@ -20,12 +28,10 @@ export default function UsuariosClient({ users, branches }: { users: any[], bran
     // Enlazamos el server action con el array de sucursales seleccionadas
     const submitUser = createUser.bind(null, selectedBranches);
 
-    // Atrapamos el envío del formulario para mostrar la contraseña
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         setLoading(true);
         
-        // 1. Guardamos el formulario en una variable ANTES del await
         const form = e.currentTarget; 
         const formData = new FormData(form);
         
@@ -34,10 +40,7 @@ export default function UsuariosClient({ users, branches }: { users: any[], bran
         setLoading(false);
 
         if (result?.success) {
-            // Mostramos la contraseña generada
             toast.success(result.message, { duration: 10000 });
-            
-            // 2. Usamos la variable 'form' que guardamos arriba
             form.reset(); 
             setSelectedBranches([]);
             setRole("ADMIN_SUCURSAL");
@@ -46,13 +49,46 @@ export default function UsuariosClient({ users, branches }: { users: any[], bran
         }
     };
 
+    // ✨ Función para que el gerente cambie contraseñas
+    const handleAdminChangePassword = async () => {
+        if (newAdminPass.length < 6) return toast.error("La contraseña debe tener al menos 6 caracteres.");
+        
+        setLoadingAction(true);
+        const res = await adminCambiarPassword(targetUser.id, newAdminPass);
+        setLoadingAction(false);
+
+        if (res.success) {
+            toast.success(res.message);
+            setIsPassModalOpen(false);
+            setNewAdminPass("");
+        } else {
+            toast.error(res.message);
+        }
+    };
+
+    // ✨ Función para habilitar/deshabilitar
+    const handleToggleStatus = async (user: any) => {
+        // Asumimos que si no tiene status definido en la BD antigua, es 1 (Activo)
+        const estadoActual = user.status !== undefined ? user.status : 1;
+        const nuevoEstado = estadoActual === 1 ? 0 : 1;
+        const accionTexto = nuevoEstado === 1 ? "habilitar" : "deshabilitar";
+
+        if (!confirm(`¿Estás seguro de ${accionTexto} el acceso a ${user.name}?`)) return;
+
+        const res = await adminToggleEstadoUsuario(user.id, nuevoEstado);
+        if (res.success) {
+            toast.success(res.message);
+        } else {
+            toast.error(res.message);
+        }
+    };
+
     return (
-        <div className="space-y-6">
+        <div className="space-y-6 relative">
             {/* Formulario de Creación */}
             <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
                 <h2 className="text-lg font-semibold mb-4">Nuevo Usuario</h2>
                 <form onSubmit={handleSubmit} className="space-y-4">
-                    {/* Ajustamos el grid a 3 columnas */}
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">Nombre Completo</label>
@@ -69,13 +105,12 @@ export default function UsuariosClient({ users, branches }: { users: any[], bran
                                 value={role} 
                                 onChange={(e) => {
                                     setRole(e.target.value);
-                                    setSelectedBranches([]); // Resetea sucursales al cambiar de rol
+                                    setSelectedBranches([]);
                                 }}
                                 className="w-full border rounded-md p-2 bg-white"
                             >
                                 <option value="GERENTE GENERAL">Gerente General</option>
                                 <option value="GERENTE DE LOGISTICA">Gerente de Logística</option>
-                                {/* ✨ AQUÍ ESTÁ EL NUEVO ROL ✨ */}
                                 <option value="ADMINISTRADOR_ZONAL">Administrador Zonal</option>
                                 <option value="ADMIN_SUCURSAL">Administrador de Sucursal</option>
                                 <option value="ALMACENERO">Almacenero</option>
@@ -84,7 +119,6 @@ export default function UsuariosClient({ users, branches }: { users: any[], bran
                         </div>
                     </div>
 
-                    {/* Selector de Sucursales (Se oculta si es Gerente) */}
                     <div className={`p-4 border rounded-md bg-gray-50 ${isGerente ? 'hidden' : 'block'}`}>
                         <label className="block text-sm font-semibold text-gray-800 mb-2">Asignar Sucursales (Obligatorio)</label>
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
@@ -115,35 +149,111 @@ export default function UsuariosClient({ users, branches }: { users: any[], bran
             </div>
 
             {/* Tabla de Usuarios */}
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
                     <thead className="bg-gray-50">
                         <tr>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Nombre</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Rol</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Sucursales Asignadas</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Sucursales</th>
+                            {/* ✨ Nuevas Columnas */}
+                            <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">Estado</th>
+                            <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">Acciones</th>
                         </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                        {users.map((user: any) => (
-                            <tr key={user.id}>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{user.name}</td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{user.email}</td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm">
-                                    <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full 
-                                        ${user.role.includes('GERENTE') || user.role.includes('ZONAL') ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'}`}>
-                                        {user.role}
-                                    </span>
-                                </td>
-                                <td className="px-6 py-4 text-sm text-gray-500">
-                                    {user.assigned_branches || 'Sin asignar'}
-                                </td>
-                            </tr>
-                        ))}
+                        {users.map((user: any) => {
+                            // Validar estado (por defecto 1 si viene nulo)
+                            const estadoActual = user.status !== undefined ? user.status : 1;
+                            
+                            return (
+                                <tr key={user.id} className={estadoActual === 0 ? "bg-red-50/50 opacity-75" : ""}>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{user.name}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{user.email}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                                        <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full 
+                                            ${user.role.includes('GERENTE') || user.role.includes('ZONAL') ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'}`}>
+                                            {user.role}
+                                        </span>
+                                    </td>
+                                    <td className="px-6 py-4 text-sm text-gray-500">
+                                        {user.assigned_branches || 'Sin asignar'}
+                                    </td>
+                                    <td className="px-6 py-4 text-center whitespace-nowrap">
+                                        <span className={`px-2 py-1 inline-flex text-[10px] uppercase font-bold rounded-full border ${estadoActual === 1 ? 'bg-green-100 text-green-700 border-green-200' : 'bg-red-100 text-red-700 border-red-200'}`}>
+                                            {estadoActual === 1 ? 'Activo' : 'Inactivo'}
+                                        </span>
+                                    </td>
+                                    <td className="px-6 py-4 text-center whitespace-nowrap text-sm font-medium">
+                                        <div className="flex items-center justify-center gap-3">
+                                            <button 
+                                                onClick={() => { setTargetUser(user); setIsPassModalOpen(true); }}
+                                                className="text-blue-600 hover:text-blue-900 bg-blue-50 p-1.5 rounded"
+                                                title="Forzar cambio de contraseña"
+                                            >
+                                                <Lock className="w-4 h-4" />
+                                            </button>
+                                            
+                                            <button 
+                                                onClick={() => handleToggleStatus(user)}
+                                                className={`p-1.5 rounded ${estadoActual === 1 ? 'text-red-600 bg-red-50 hover:text-red-900' : 'text-green-600 bg-green-50 hover:text-green-900'}`}
+                                                title={estadoActual === 1 ? "Deshabilitar Usuario" : "Habilitar Usuario"}
+                                            >
+                                                {estadoActual === 1 ? <UserX className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            );
+                        })}
                     </tbody>
                 </table>
             </div>
+
+            {/* ✨ MODAL DE CAMBIO DE CONTRASEÑA FORZADO */}
+            {isPassModalOpen && targetUser && (
+                <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4">
+                    <div className="bg-white rounded-xl shadow-2xl max-w-sm w-full overflow-hidden">
+                        <div className="bg-blue-900 p-4 text-white flex justify-between items-center">
+                            <h3 className="font-bold text-lg flex items-center gap-2">
+                                <Lock className="w-5 h-5" /> Nueva Clave
+                            </h3>
+                            <button onClick={() => setIsPassModalOpen(false)} className="text-blue-200 hover:text-white text-2xl leading-none pb-1">&times;</button>
+                        </div>
+                        <div className="p-6 space-y-4">
+                            <div>
+                                <p className="text-sm text-gray-500 mb-4">
+                                    Cambiar la contraseña de <strong className="text-gray-800">{targetUser.name}</strong>.
+                                </p>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">Nueva Contraseña</label>
+                                <input 
+                                    type="text" 
+                                    className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                                    placeholder="Escribe la nueva clave..."
+                                    value={newAdminPass}
+                                    onChange={e => setNewAdminPass(e.target.value)}
+                                />
+                            </div>
+                            <div className="mt-6 flex justify-end gap-3 pt-4 border-t border-gray-100">
+                                <button 
+                                    onClick={() => setIsPassModalOpen(false)} 
+                                    className="px-4 py-2 text-gray-600 bg-gray-100 font-bold rounded-lg hover:bg-gray-200 transition-colors"
+                                >
+                                    Cancelar
+                                </button>
+                                <button 
+                                    onClick={handleAdminChangePassword} 
+                                    disabled={loadingAction}
+                                    className="px-4 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                                >
+                                    {loadingAction ? 'Aplicando...' : 'Cambiar y Guardar'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
