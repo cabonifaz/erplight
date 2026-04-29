@@ -1,17 +1,15 @@
 'use client'
 
 import { useState } from "react";
-// ✨ Asegúrate de importar las dos nuevas acciones:
 import { createUser, adminCambiarPassword, adminToggleEstadoUsuario } from "@/actions/admin-actions";
 import { toast } from "sonner"; 
-import { Lock, UserX, UserCheck } from "lucide-react"; // ✨ Nuevos íconos
+import { Lock, UserX, UserCheck } from "lucide-react"; 
 
 export default function UsuariosClient({ users, branches }: { users: any[], branches: any[] }) {
     const [role, setRole] = useState("ADMIN_SUCURSAL");
     const [selectedBranches, setSelectedBranches] = useState<number[]>([]);
     const [loading, setLoading] = useState(false);
 
-    // ✨ Estados para el modal de cambio de contraseña del admin
     const [isPassModalOpen, setIsPassModalOpen] = useState(false);
     const [targetUser, setTargetUser] = useState<any>(null);
     const [newAdminPass, setNewAdminPass] = useState("");
@@ -23,19 +21,27 @@ export default function UsuariosClient({ users, branches }: { users: any[], bran
         );
     };
 
-    const isGerente = role === "GERENTE GENERAL" || role === "GERENTE DE LOGISTICA";
+    // ✨ NUEVO: Incluimos al JEFE DE RRHH como rol global
+    const isGlobalRole = role === "GERENTE GENERAL" || role === "GERENTE DE LOGISTICA" || role === "JEFE DE RRHH";
 
-    // Enlazamos el server action con el array de sucursales seleccionadas
     const submitUser = createUser.bind(null, selectedBranches);
 
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-        e.preventDefault();
-        setLoading(true);
-        
-        const form = e.currentTarget; 
-        const formData = new FormData(form);
-        
-        const result = await submitUser(formData);
+    e.preventDefault();
+    
+    // VALIDACIÓN PREVIA:
+    // Si NO es un rol global y no hay sucursales, detenemos y avisamos.
+    if (!isGlobalRole && selectedBranches.length === 0) {
+        return toast.error("Debes asignar al menos una sucursal para este rol.");
+    }
+
+    setLoading(true);
+    const form = e.currentTarget; 
+    const formData = new FormData(form);
+    
+    // Si es Global, enviamos un array vacío o un ID por defecto (ej. 0 o 1) 
+    // según como lo espere tu base de datos para la oficina central.
+    const result = await submitUser(formData);
         
         setLoading(false);
 
@@ -49,7 +55,6 @@ export default function UsuariosClient({ users, branches }: { users: any[], bran
         }
     };
 
-    // ✨ Función para que el gerente cambie contraseñas
     const handleAdminChangePassword = async () => {
         if (newAdminPass.length < 6) return toast.error("La contraseña debe tener al menos 6 caracteres.");
         
@@ -66,9 +71,7 @@ export default function UsuariosClient({ users, branches }: { users: any[], bran
         }
     };
 
-    // ✨ Función para habilitar/deshabilitar
     const handleToggleStatus = async (user: any) => {
-        // Asumimos que si no tiene status definido en la BD antigua, es 1 (Activo)
         const estadoActual = user.status !== undefined ? user.status : 1;
         const nuevoEstado = estadoActual === 1 ? 0 : 1;
         const accionTexto = nuevoEstado === 1 ? "habilitar" : "deshabilitar";
@@ -111,6 +114,8 @@ export default function UsuariosClient({ users, branches }: { users: any[], bran
                             >
                                 <option value="GERENTE GENERAL">Gerente General</option>
                                 <option value="GERENTE DE LOGISTICA">Gerente de Logística</option>
+                                {/* ✨ NUEVO: Opción de Jefe de RRHH */}
+                                <option value="JEFE DE RRHH">Jefe de RRHH</option>
                                 <option value="ADMINISTRADOR_ZONAL">Administrador Zonal</option>
                                 <option value="ADMIN_SUCURSAL">Administrador de Sucursal</option>
                                 <option value="ALMACENERO">Almacenero</option>
@@ -119,7 +124,8 @@ export default function UsuariosClient({ users, branches }: { users: any[], bran
                         </div>
                     </div>
 
-                    <div className={`p-4 border rounded-md bg-gray-50 ${isGerente ? 'hidden' : 'block'}`}>
+                    {/* ✨ NUEVO: Ocultamos si es un rol global (isGlobalRole) */}
+                    <div className={`p-4 border rounded-md bg-gray-50 ${isGlobalRole ? 'hidden' : 'block'}`}>
                         <label className="block text-sm font-semibold text-gray-800 mb-2">Asignar Sucursales (Obligatorio)</label>
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                             {branches.map(branch => (
@@ -157,14 +163,12 @@ export default function UsuariosClient({ users, branches }: { users: any[], bran
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Rol</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Sucursales</th>
-                            {/* ✨ Nuevas Columnas */}
                             <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">Estado</th>
                             <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">Acciones</th>
                         </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
                         {users.map((user: any) => {
-                            // Validar estado (por defecto 1 si viene nulo)
                             const estadoActual = user.status !== undefined ? user.status : 1;
                             
                             return (
@@ -173,7 +177,7 @@ export default function UsuariosClient({ users, branches }: { users: any[], bran
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{user.email}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm">
                                         <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full 
-                                            ${user.role.includes('GERENTE') || user.role.includes('ZONAL') ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'}`}>
+                                            ${user.role.includes('GERENTE') || user.role.includes('ZONAL') || user.role.includes('JEFE') ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'}`}>
                                             {user.role}
                                         </span>
                                     </td>
@@ -211,7 +215,7 @@ export default function UsuariosClient({ users, branches }: { users: any[], bran
                 </table>
             </div>
 
-            {/* ✨ MODAL DE CAMBIO DE CONTRASEÑA FORZADO */}
+            {/* MODAL DE CAMBIO DE CONTRASEÑA FORZADO */}
             {isPassModalOpen && targetUser && (
                 <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4">
                     <div className="bg-white rounded-xl shadow-2xl max-w-sm w-full overflow-hidden">

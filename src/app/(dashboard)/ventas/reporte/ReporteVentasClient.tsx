@@ -8,7 +8,7 @@ export default function ReporteVentasClient({ sucursales, metodosPago }: { sucur
   const [isLoading, setIsLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
 
-  // ✨ NUEVO ESTADO: Guardará el límite máximo de días configurado en BD
+  // Estado: Guardará el límite máximo de días configurado en BD
   const [maxDiasPermitidos, setMaxDiasPermitidos] = useState<number | null>(null);
 
   // Estados de los Filtros
@@ -19,7 +19,7 @@ export default function ReporteVentasClient({ sucursales, metodosPago }: { sucur
     metodoPago: ""
   });
 
-  // ✨ NUEVO: Cargar configuración al montar el componente
+  // Cargar configuración al montar el componente
   useEffect(() => {
     const cargarConfiguracion = async () => {
         const res = await obtenerLimiteDiasReporte();
@@ -34,7 +34,7 @@ export default function ReporteVentasClient({ sucursales, metodosPago }: { sucur
   }, []);
 
   const handleBuscar = async () => {
-    // ✨ REGLAS DE VALIDACIÓN ESTRICTAS
+    // REGLAS DE VALIDACIÓN ESTRICTAS
     
     // 1. Fechas obligatorias
     if (!filtros.fechaInicio || !filtros.fechaFin) {
@@ -83,10 +83,11 @@ export default function ReporteVentasClient({ sucursales, metodosPago }: { sucur
     setIsLoading(false);
   };
 
-  // Calculamos el total previniendo errores de NaN por comas en los decimales
+  // ✨ CORRECCIÓN AQUÍ: Multiplicamos el valor limpio (que viene como precio unitario) por la cantidad
   const totalMonto = ventas.reduce((sum, v) => {
     const valorLimpio = String(v.precio_total || '0').replace(',', '.');
-    return sum + Number(valorLimpio);
+    const subtotalFila = Number(valorLimpio) * Number(v.cantidad || 1);
+    return sum + subtotalFila;
   }, 0);
 
   return (
@@ -94,7 +95,7 @@ export default function ReporteVentasClient({ sucursales, metodosPago }: { sucur
       
       {/* 🔍 CAJA DE FILTROS */}
       <div className="bg-white p-5 rounded-lg border border-gray-200 shadow-sm relative">
-        {/* ✨ Etiqueta visual informativa del límite */}
+        {/* Etiqueta visual informativa del límite */}
         {maxDiasPermitidos && (
             <div className="absolute -top-3 left-4 bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wide border border-blue-200">
                 Rango máximo: {maxDiasPermitidos} días
@@ -167,7 +168,7 @@ export default function ReporteVentasClient({ sucursales, metodosPago }: { sucur
         <div className="grid grid-cols-2 gap-4 animate-in fade-in">
             <div className="bg-blue-50 border border-blue-100 p-4 rounded-lg shadow-sm">
                 <p className="text-sm font-medium text-blue-800">Total Recaudado (Filtro Actual)</p>
-                <p className="text-2xl font-bold text-blue-900">S/ {new Intl.NumberFormat('es-PE').format(totalMonto)}</p>
+                <p className="text-2xl font-bold text-blue-900">S/ {new Intl.NumberFormat('es-PE', {minimumFractionDigits: 2}).format(totalMonto)}</p>
             </div>
             <div className="bg-green-50 border border-green-100 p-4 rounded-lg shadow-sm">
                 <p className="text-sm font-medium text-green-800">Productos Vendidos</p>
@@ -218,7 +219,10 @@ export default function ReporteVentasClient({ sucursales, metodosPago }: { sucur
                             {v.cantidad}
                         </span>
                     </td>
-                    <td className="p-3 font-black text-blue-600 text-right">{new Intl.NumberFormat('es-PE', {minimumFractionDigits: 2}).format(Number(v.precio_total || 0))}</td>
+                    {/* ✨ CORRECCIÓN AQUÍ: Multiplicamos en la fila para que muestre el total real */}
+                    <td className="p-3 font-black text-blue-600 text-right">
+                        {new Intl.NumberFormat('es-PE', {minimumFractionDigits: 2}).format(Number(v.precio_total || 0) * Number(v.cantidad || 1))}
+                    </td>
                     <td className="p-3">
                       <span className="px-2 py-1 bg-white text-gray-700 rounded-md text-[10px] font-bold uppercase tracking-wider border border-gray-300 shadow-sm">
                         {v.payment_method}

@@ -18,7 +18,13 @@ export async function getBranches() {
     }
 }
 
-export async function createBranch(formData: FormData) {
+export async function createBranch(userRole: string, formData: FormData) {
+    // 1. Validar Permisos por Rol
+    const rol = userRole.toUpperCase();
+    if (rol !== 'GERENTE GENERAL' && rol !== 'GERENTE DE LOGISTICA' && rol !== 'JEFE DE RRHH') {
+        return { success: false, message: "No tienes permisos para crear sucursales. Solo Gerencia y Jefaturas." };
+    }
+
     const name = formData.get("name")?.toString();
     const ruc = formData.get("ruc")?.toString();
     const razon_social = formData.get("razon_social")?.toString();
@@ -32,6 +38,7 @@ export async function createBranch(formData: FormData) {
         revalidatePath("/dashboard/sucursales"); 
         return { success: true, message: "Sucursal creada correctamente." };
     } catch (error: any) {
+        // Capturará el error "Límite de sucursales alcanzado" si el SP lo dispara
         return { success: false, message: error.sqlMessage || error.message };
     }
 }
@@ -83,12 +90,26 @@ export async function createUser(selectedBranchIds: number[], formData: FormData
         if (!newUserId) throw new Error("Error al obtener el ID del usuario creado.");
 
         // Lógica de asignación usando SPs
-        if (role === 'GERENTE GENERAL' ) {
-            await connection.query("CALL sp_asignar_sucursales_gerente(?)", [newUserId]);
-        } else {
-            if (selectedBranchIds.length === 0) {
-                throw new Error("Debes asignar al menos una sucursal para este rol.");
-            }
+        const rolesGlobales = ['GERENTE GENERAL', 'GERENTE DE LOGISTICA', 'JEFE DE RRHH'];
+
+// 2. Verificamos si el rol creado está en esa lista
+if (rolesGlobales.includes(role || "")) {
+    // Si es global, le damos acceso a todas las sedes automáticamente
+    await connection.query("CALL sp_asignar_sucursales_gerente(?)", [newUserId]);
+} else {
+    // Si NO es global (Almacenero, Admin Sucursal), validamos que se haya marcado algo
+    if (selectedBranchIds.length === 0) {
+        throw new Error("Debes asignar al menos una sucursal para este rol.");
+    }
+    for (let i = 0; i < selectedBranchIds.length; i++) {
+        const branchId = selectedBranchIds[i];
+        const isMain = i === 0 ? 1 : 0; 
+        await connection.query(
+            "CALL sp_asignar_sucursal_usuario(?, ?, ?)", 
+            [newUserId, branchId, isMain]
+        );
+    }
+
             for (let i = 0; i < selectedBranchIds.length; i++) {
                 const branchId = selectedBranchIds[i];
                 const isMain = i === 0 ? 1 : 0; 
@@ -179,5 +200,19 @@ export async function adminToggleEstadoUsuario(userId: number, nuevoEstado: numb
         return { success: false, message: "Error al cambiar el estado." };
     } finally {
         connection.release();
+    }
+}
+
+// --- HABILITAR / DESHABILITAR SUCURSAL ---
+export async function toggleBranchStatus(branchId: number, currentStatus: number) {
+    const newStatus = currentStatus === 1 ? 0 : 1;
+    try {
+        await pool.query("CALL sp_toggle_sucursal(?, ?)", [branchId, newStatus]);
+        revalidatePath('/dashboard/sucursales');
+        const estadoTexto = newStatus === 1 ? 'habilitada' : 'deshabilitada';
+        return { success: true, message: `Sucursal ${estadoTexto} correctamente.` };
+    } catch (error: any) {
+        console.error("Error al cambiar estado de sucursal:", error);
+        return { success: false, message: "Error al cambiar el estado." };
     }
 }

@@ -2,16 +2,14 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useSession } from 'next-auth/react'; 
-import * as XLSX from 'xlsx'; // ✨ IMPORTACIÓN PARA EXPORTAR EXCEL
+import * as XLSX from 'xlsx'; 
 import { 
     getEmpleadosPorSucursal, crearEmpleado, editarEmpleado, registrarAsistencia, 
     obtenerHorariosSemana, guardarHorarioEmpleado, obtenerCatalogosRRHH, 
     obtenerEstadoAsistencia, obtenerSucursales, obtenerDisponibilidad, 
     guardarDisponibilidad, autogenerarHorarioSemana, publicarHorariosSemana, 
     eliminarHorarioEmpleado, obtenerReporteHoras,
-    // ✨ IMPORTAMOS LA NUEVA FUNCIÓN DEL DETALLE DE HORAS
     obtenerDetalleHorasEmpleado,
-    // ✨ IMPORTAMOS LAS NUEVAS FUNCIONES DE CONTRATOS (Incluyendo eliminar)
     getContratosEmpleado, subirContratoEmpleado, eliminarContratoEmpleado 
 } from '@/actions/rrhh-actions';
 
@@ -25,7 +23,8 @@ const getLunes = (d: Date) => {
 export default function RRHHPage() {
     const { data: session, status } = useSession(); 
     const rolCrudo = (session?.user as any)?.role || 'GERENTE_GENERAL'; 
-    const rolUsuario = rolCrudo.toUpperCase().replace(' ', '_'); 
+    // ✨ NUEVO: Cambiamos replace por replaceAll para formatear 'JEFE DE RRHH' a 'JEFE_DE_RRHH'
+    const rolUsuario = rolCrudo.toUpperCase().replaceAll(' ', '_'); 
     const sucursalUsuario = (session?.user as any)?.branch_id || 1;
 
     const [activeTab, setActiveTab] = useState('empleados'); 
@@ -58,7 +57,6 @@ export default function RRHHPage() {
     const [reporteDatos, setReporteDatos] = useState<any[]>([]);
     const [cargandoReporte, setCargandoReporte] = useState(false);
 
-    // ✨ ESTADOS PARA EL MÓDULO DE CONTRATOS
     const [isContratoModalOpen, setIsContratoModalOpen] = useState(false);
     const [contratoEmp, setContratoEmp] = useState({ id: 0, nombre: '' });
     const [contratosLista, setContratosLista] = useState<any[]>([]); 
@@ -66,7 +64,6 @@ export default function RRHHPage() {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [subiendoContrato, setSubiendoContrato] = useState(false); 
 
-    // ✨ ESTADOS PARA EL MÓDULO DE DETALLE DE HORAS (Drill-down)
     const [isDetalleModalOpen, setIsDetalleModalOpen] = useState(false);
     const [detalleEmpSeleccionado, setDetalleEmpSeleccionado] = useState<any>(null);
     const [detalleHoras, setDetalleHoras] = useState<any[]>([]);
@@ -102,7 +99,8 @@ export default function RRHHPage() {
                 if (rolUsuario === 'ADMIN_SUCURSAL' && sucursalUsuario) setSucursalActiva(sucursalUsuario);
             }
         };
-        if (rolUsuario === 'GERENTE_GENERAL' || rolUsuario === 'ADMIN_SUCURSAL') initData();
+        // ✨ NUEVO: Agregamos JEFE_DE_RRHH para que cargue los datos iniciales
+        if (rolUsuario === 'GERENTE_GENERAL' || rolUsuario === 'ADMIN_SUCURSAL' || rolUsuario === 'JEFE_DE_RRHH') initData();
     }, [rolUsuario, sucursalUsuario]);
 
     useEffect(() => {
@@ -320,7 +318,6 @@ export default function RRHHPage() {
         XLSX.writeFile(wb, `Planilla_Pagos_${reporteInicio}_al_${reporteFin}.xlsx`);
     };
 
-    // ✨ ABRIR MODAL CONTRATOS
     const handleAbrirContratos = async (emp: any) => {
         setContratoEmp({ id: emp.id, nombre: emp.nombre_completo });
         setIsContratoModalOpen(true);
@@ -330,7 +327,6 @@ export default function RRHHPage() {
         if (res.success) setContratosLista(res.data);
     };
 
-    // ✨ SUBIR EL PDF
     const handleSubirContrato = async () => {
         if (!nuevoContratoFecha) return alert("Selecciona la fecha de vencimiento");
         const file = fileInputRef.current?.files?.[0];
@@ -351,14 +347,13 @@ export default function RRHHPage() {
             
             const listRes = await getContratosEmpleado(contratoEmp.id);
             if (listRes.success) setContratosLista(listRes.data);
-            cargarDatosSucursal(); // Refrescar lista para alerta de vencimiento
+            cargarDatosSucursal(); 
         } else {
             alert("❌ Error: " + res.message);
         }
         setSubiendoContrato(false);
     };
 
-    // ✨ ELIMINAR CONTRATO
     const handleEliminarContrato = async (idContrato: number, urlArchivo: string) => {
         if (!confirm("¿Seguro que deseas eliminar este contrato? Esta acción no se puede deshacer.")) return;
         
@@ -372,13 +367,11 @@ export default function RRHHPage() {
         }
     };
 
-    // ✨ ABRIR MODAL DETALLE DE HORAS
     const handleAbrirDetalle = async (emp: any) => {
         setDetalleEmpSeleccionado(emp);
         setIsDetalleModalOpen(true);
         setCargandoDetalle(true);
         
-        // Asumiendo que el reporte devuelve el ID del empleado como 'employee_id' o 'id'
         const idEmpleado = emp.employee_id || emp.id; 
         
         const res = await obtenerDetalleHorasEmpleado(idEmpleado, reporteInicio, reporteFin);
@@ -388,13 +381,14 @@ export default function RRHHPage() {
 
     if (status === 'loading') return <div className="min-h-[60vh] flex justify-center items-center font-bold text-gray-500">Cargando credenciales...</div>;
 
-    if (rolUsuario !== 'GERENTE_GENERAL' && rolUsuario !== 'ADMIN_SUCURSAL') {
+    // ✨ NUEVO: Damos acceso al JEFE DE RRHH
+    if (rolUsuario !== 'GERENTE_GENERAL' && rolUsuario !== 'ADMIN_SUCURSAL' && rolUsuario !== 'JEFE_DE_RRHH') {
         return ( 
             <div className="flex flex-col items-center justify-center min-h-[60vh]">
                 <span className="text-6xl mb-4">⛔</span>
                 <h1 className="text-2xl font-bold text-gray-800">Acceso Restringido</h1>
                 <p className="mt-2 text-gray-500">Tu rol en la base de datos es: <span className="font-bold text-red-600">{rolCrudo}</span></p>
-                <p className="text-xs text-gray-400 mt-1">El sistema esperaba: GERENTE_GENERAL o ADMIN_SUCURSAL</p>
+                <p className="text-xs text-gray-400 mt-1">El sistema esperaba: GERENTE_GENERAL, ADMIN_SUCURSAL o JEFE_DE_RRHH</p>
             </div> 
         );
     }
@@ -413,7 +407,8 @@ export default function RRHHPage() {
                 </div>
                 <div className="flex items-center gap-3 bg-blue-50 p-2 px-4 rounded-lg border border-blue-100 shadow-sm">
                     <span className="text-sm font-bold text-blue-800">🏢 Sede:</span>
-                    {rolUsuario === 'GERENTE_GENERAL' ? (
+                    {/* ✨ NUEVO: El jefe de RRHH también ve el selector de sucursales */}
+                    {rolUsuario === 'GERENTE_GENERAL' || rolUsuario === 'JEFE_DE_RRHH' ? (
                         <select className="p-2 border border-blue-200 rounded-md bg-white text-sm focus:ring-2 focus:ring-blue-500 font-medium cursor-pointer" value={sucursalActiva} onChange={(e) => setSucursalActiva(Number(e.target.value))}>
                             {sucursales.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                         </select>
@@ -639,7 +634,7 @@ export default function RRHHPage() {
                                                         className="text-sm bg-blue-100 hover:bg-blue-200 text-blue-700 py-1 px-2 rounded-md transition-colors"
                                                         title="Ver desglose diario"
                                                     >
-                                                         Ver Detalle
+                                                        👁️ Ver Detalle
                                                     </button>
                                                 </td>
                                             </tr>

@@ -373,3 +373,57 @@ export async function analizarInventarioCompras(branchId: number) {
         connection.release();
     }
 }
+
+export async function getMenuPOS(requestedBranchId?: number) {
+    const session = await auth();
+    if (!session?.user) return { success: false, data: [] };
+
+    // @ts-ignore
+    const userRole = session.user.role;
+    // @ts-ignore
+    const userBranchId = session.user.branch_id || 1; 
+
+    // LÓGICA DE SEGURIDAD: 
+    // Si es Gerente General y pide una sucursal específica, le damos acceso.
+    // Si es cualquier otro rol, lo forzamos a usar SU sucursal (userBranchId).
+    let targetBranchId = userBranchId;
+    if (userRole === 'GERENTE GENERAL' && requestedBranchId) {
+        targetBranchId = requestedBranchId;
+    }
+
+    const connection = await pool.getConnection();
+    try {
+        const [rows]: any = await connection.query("CALL sp_obtener_menu_pos(?)", [targetBranchId]);
+        const menuItems = rows[0] || [];
+        return { success: true, data: menuItems, branch_id: targetBranchId };
+    } catch (error) {
+        console.error("Error obteniendo el menú POS:", error);
+        return { success: false, data: [] };
+    } finally {
+        connection.release();
+    }
+}
+
+// AGREGA ESTA FUNCIÓN AL FINAL DE TU ARCHIVO sale-actions.ts
+
+// ✨ AÑADIMOS paymentMethod COMO SEXTO PARÁMETRO
+export async function processSalePOS(branchId: number, total: number, cart: any[], clientDocument: string = "", paymentMethod: string = "EFECTIVO") {
+    const session = await auth();
+    if (!session?.user) return { success: false, message: "No autorizado" };
+
+    // @ts-ignore
+    const userId = session.user.id || 1;
+    const cartJson = JSON.stringify(cart);
+
+    const connection = await pool.getConnection();
+    try {
+        // ✨ PASAMOS EL SEXTO PARÁMETRO A MYSQL
+        await connection.query("CALL sp_procesar_venta_pos(?, ?, ?, ?, ?, ?)", [branchId, userId, total, cartJson, clientDocument, paymentMethod]);
+        return { success: true, message: "¡Venta procesada exitosamente! Stock actualizado." };
+    } catch (error: any) {
+        console.error("Error al procesar la venta POS:", error);
+        return { success: false, message: `Error SQL: ${error.message}` };
+    } finally {
+        connection.release();
+    }
+}
