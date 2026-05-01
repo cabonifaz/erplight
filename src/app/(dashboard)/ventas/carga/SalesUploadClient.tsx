@@ -5,9 +5,17 @@ import * as XLSX from 'xlsx';
 import { processExcelSales, validateExcelSales, obtenerHistorialCargas } from '@/actions/sale-actions'; 
 
 export default function SalesUploadClient({ sucursales }: { sucursales: any[] }) {
+  // ✨ 1. FILTRO ANTI-DUPLICADOS DEFINITIVO
+  const sucursalesUnicas = sucursales.filter((branch, index, self) =>
+    index === self.findIndex((b) => b.id === branch.id)
+  );
+
+  // ✨ 2. AUTO-SELECCIÓN SI SOLO HAY UNA SUCURSAL
   const [fileData, setFileData] = useState<any[]>([]);
   const [fileName, setFileName] = useState<string | null>(null);
-  const [selectedBranch, setSelectedBranch] = useState("");
+  const [selectedBranch, setSelectedBranch] = useState(
+    sucursalesUnicas.length === 1 ? String(sucursalesUnicas[0].id) : ""
+  );
   
   const [isProcessing, setIsProcessing] = useState(false);
   const [isValidated, setIsValidated] = useState(false);
@@ -164,8 +172,9 @@ export default function SalesUploadClient({ sucursales }: { sucursales: any[] })
       <div className="mb-6 bg-white p-4 rounded-lg border border-gray-200 shadow-sm flex flex-col sm:flex-row sm:items-center gap-4">
         <label className="font-semibold text-gray-700 whitespace-nowrap">Sucursal de Venta:</label>
         <select 
-          className="p-2 border border-gray-300 rounded-md bg-gray-50 focus:ring-blue-500 focus:border-blue-500 flex-1 max-w-md cursor-pointer"
+          className={`p-2 border border-gray-300 rounded-md bg-gray-50 focus:ring-blue-500 focus:border-blue-500 flex-1 max-w-md ${sucursalesUnicas.length === 1 ? 'cursor-not-allowed opacity-80 font-bold' : 'cursor-pointer'}`}
           value={selectedBranch}
+          disabled={sucursalesUnicas.length === 1} // 🔒 BLOQUEO ACTIVADO
           onChange={(e) => {
             setSelectedBranch(e.target.value);
             setIsValidated(false);
@@ -173,8 +182,12 @@ export default function SalesUploadClient({ sucursales }: { sucursales: any[] })
             setValidationIssues([]);
           }}
         >
-          <option value="" disabled>-- Selecciona a qué sucursal pertenecen estas ventas --</option>
-          {sucursales?.map(s => (
+          {/* Si hay más de una sucursal, mostramos el texto de ayuda por defecto */}
+          {sucursalesUnicas.length !== 1 && (
+            <option value="" disabled>-- Selecciona a qué sucursal pertenecen estas ventas --</option>
+          )}
+          {/* Renderizamos las opciones LIMPIAS */}
+          {sucursalesUnicas.map(s => (
             <option key={s.id} value={s.id}>{s.name}</option>
           ))}
         </select>

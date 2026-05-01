@@ -353,21 +353,39 @@ export function ViewRequestSheet({ request, open, onOpenChange }: ViewRequestShe
                     )}
 
                     {/* COTIZACIONES */}
-                    <div className="space-y-4">
-                        <h3 className="text-xs font-bold text-gray-900 uppercase tracking-widest border-b pb-2">Cotizaciones</h3>
-                        <div className="space-y-2">
-                             {quotations.map((q) => (
-                                <div key={q.id} className={cn("flex justify-between items-center p-3 border rounded-lg", q.is_selected ? "bg-green-50 border-green-200" : "bg-white")}>
-                                    <div className="flex items-center gap-3 overflow-hidden">
-                                        <FileText className="w-4 h-4 text-gray-400" />
-                                        <span className="text-sm truncate">{q.file_name}</span>
-                                    </div>
-                                    <Button variant="ghost" size="icon" asChild className="h-8 w-8 text-gray-400 hover:text-blue-600">
-                                        <a href={q.file_path} target="_blank" rel="noreferrer"><Download className="w-4 h-4"/></a>
-                                    </Button>
-                                </div>
-                             ))}
-                        </div>
+                    <div className="mt-6 border-t pt-4">
+                        <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Cotizaciones Adjuntas</h3>
+                        
+                        {quotations && quotations.length > 0 ? (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                {quotations.map((cot: any, index: number) => (
+                                    <a 
+                                        key={cot.id || index} 
+                                        href={cot.file_url || cot.file_path} 
+                                        target="_blank" 
+                                        rel="noopener noreferrer"
+                                        className="flex items-center gap-3 p-3 bg-white border border-gray-200 rounded-lg hover:border-blue-300 hover:bg-blue-50 transition-all group shadow-sm"
+                                    >
+                                        <div className="p-2 bg-red-50 text-red-600 rounded-md group-hover:bg-red-100 transition-colors">
+                                            <FileText className="w-5 h-5" />
+                                        </div>
+                                        <div className="flex flex-col overflow-hidden">
+                                            <span className="text-sm font-semibold text-gray-700 truncate group-hover:text-blue-700">
+                                                {cot.file_name || `Documento Adjunto ${index + 1}`}
+                                            </span>
+                                            <span className="text-[10px] text-gray-400 uppercase font-bold tracking-wider mt-0.5">
+                                                Clic para abrir PDF
+                                            </span>
+                                        </div>
+                                    </a>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="p-6 border-2 border-dashed border-gray-200 rounded-xl bg-gray-50 text-center flex flex-col items-center gap-2">
+                                <FileText className="w-8 h-8 text-gray-300" />
+                                <p className="text-sm text-gray-500 font-medium">No se adjuntaron cotizaciones a esta solicitud.</p>
+                            </div>
+                        )}
                     </div>
                 </div>
             </SheetContent>

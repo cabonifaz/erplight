@@ -304,23 +304,81 @@ export async function processExcelSales(payload: { data: any[], branchId: number
         connection.release();
     }
 }
-
-// --- 3. REPORTE DE VENTAS ---
 export async function getReporteVentas(filtros: {
     branchId?: number | null;
     fechaInicio?: string | null;
     fechaFin?: string | null;
     metodoPago?: string | null;
 }) {
+    // 1. Obtenemos la sesión del usuario para saber quién está pidiendo el reporte
+    const session = await auth();
+    if (!session?.user) return { success: false, message: "No autorizado", data: [] };
+
+    // ✨ CORRECCIÓN TYPESCRIPT: Evita las líneas rojas
+    const sessionUser = session.user as any;
+
+    const role = sessionUser.role?.toUpperCase().trim() || "";
+    const userId = sessionUser.id || sessionUser.sub || sessionUser.userId || sessionUser.id_usuario;
+
     const connection = await pool.getConnection();
+    
     try {
         const bId = filtros.branchId || null;
         const fInicio = filtros.fechaInicio || null;
         const fFin = filtros.fechaFin || null;
         const mPago = filtros.metodoPago || null;
 
-        const [rows]: any = await connection.query("CALL sp_reporte_ventas(?, ?, ?, ?)", [bId, fInicio, fFin, mPago]);
-        return { success: true, data: rows[0] || [] };
+        // Validamos si es un superusuario que SÍ tiene derecho a ver toda la empresa
+        const isGerente = role === 'GERENTE GENERAL' || role === 'CEO' || role === 'ADMINISTRADOR GENERAL';
+
+        // =========================================================================
+        // CASO A: Eligió una sucursal específica (bId no es nulo) O es Gerente
+        // =========================================================================
+        if (bId !== null || isGerente) {
+            // El SP funciona normal. Si es gerente y bId es null, traerá todo.
+            const [rows]: any = await connection.query("CALL sp_reporte_ventas(?, ?, ?, ?)", [bId, fInicio, fFin, mPago]);
+            return { success: true, data: rows[0] || [] };
+        } 
+        
+        // =========================================================================
+        // CASO B: Es Zonal/Admin, eligió "Todas las sucursales" (bId es null)
+        // =========================================================================
+       // =========================================================================
+        // CASO B: Es Zonal/Admin, eligió "Todas las sucursales" (bId es null)
+        // =========================================================================
+        else {
+            // ✨ CORRECCIÓN: Agregamos DISTINCT para evitar que las sedes repetidas dupliquen las ventas
+            const [sedesAsignadas]: any = await connection.query(
+                `SELECT DISTINCT branch_id FROM user_branches WHERE user_id = ?`, 
+                [userId]
+            );
+
+            // Si por algún error no tiene sedes, le devolvemos un array vacío por seguridad
+            if (!sedesAsignadas || sedesAsignadas.length === 0) {
+                return { success: true, data: [] }; 
+            }
+
+            // 2. Iteramos sobre sus sedes autorizadas y consultamos el SP una por una
+            let ventasCombinadas: any[] = [];
+            
+            for (const sede of sedesAsignadas) {
+                const [rows]: any = await connection.query(
+                    "CALL sp_reporte_ventas(?, ?, ?, ?)", 
+                    [sede.branch_id, fInicio, fFin, mPago]
+                );
+                
+                // Si la sede tiene ventas en ese rango de fechas, las sumamos al bloque total
+                if (rows[0] && rows[0].length > 0) {
+                    ventasCombinadas = [...ventasCombinadas, ...rows[0]];
+                }
+            }
+
+            // 3. Ordenamos toda la data combinada por fecha (las más recientes primero)
+            ventasCombinadas.sort((a, b) => new Date(b.sale_date).getTime() - new Date(a.sale_date).getTime());
+
+            return { success: true, data: ventasCombinadas };
+        }
+
     } catch (error: any) {
         console.error("Error obteniendo reporte:", error);
         return { success: false, message: error.message, data: [] };
@@ -328,15 +386,52 @@ export async function getReporteVentas(filtros: {
         connection.release();
     }
 }
-
 export async function obtenerHistorialCargas() {
+    const session = await auth();
+    if (!session?.user?.id) return { success: false, message: "No autorizado", data: [] };
+
+    const userId = session.user.id;
+    const role = session.user.role?.toUpperCase() || "";
+
     const connection = await pool.getConnection();
     try {
+        // 1. Obtenemos todo el historial de la BD
         const [rows]: any = await connection.query("CALL sp_obtener_historial_cargas()");
-        return { success: true, data: rows[0] || [] };
+        const todoElHistorial = rows[0] || [];
+
+        // 2. Roles privilegiados que ven todo
+        const PRIVILEGED_ROLES = ["GERENTE GENERAL", "ADMINISTRADOR GENERAL", "LOGISTICA", "CEO"];
+        
+        if (PRIVILEGED_ROLES.includes(role)) {
+            return { success: true, data: todoElHistorial };
+        } 
+        
+        // 3. Lógica con INNER JOIN (La que comprobamos que funciona)
+        const [branchRows]: any = await connection.query(`
+            SELECT DISTINCT b.name 
+            FROM branches b
+            INNER JOIN user_branches ub ON b.id = ub.branch_id
+            WHERE ub.user_id = ?
+        `, [userId]);
+        
+        if (branchRows.length > 0) {
+            // Normalizamos a minúsculas y sin espacios al final
+            const nombresPermitidos = branchRows.map((r: any) => String(r.name).trim().toLowerCase());
+
+            const historialFiltrado = todoElHistorial.filter((log: any) => {
+                const logSucursal = String(log.sucursal || "").trim().toLowerCase();
+                return nombresPermitidos.includes(logSucursal);
+            });
+
+            return { success: true, data: historialFiltrado };
+        }
+        
+        // Si no tiene sedes asignadas, enviamos vacío
+        return { success: true, data: [] };
+
     } catch (error: any) {
-        console.error("Error obteniendo historial:", error);
-        return { success: false, message: error.message };
+        console.error("Error obteniendo historial filtrado:", error);
+        return { success: false, message: error.message, data: [] };
     } finally {
         connection.release();
     }

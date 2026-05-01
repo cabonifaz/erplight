@@ -1,17 +1,20 @@
 'use client'
 
 import { useState, useEffect } from "react";
+import { useSession } from "next-auth/react";
 import { generarProyeccion, obtenerDetalleProyeccion } from "@/actions/projection-actions";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
 import { TrendingUp, ShoppingCart, Clock, Utensils, Globe, Calculator, AlertCircle } from "lucide-react";
 
 export default function ProyeccionGlobalPage() {
-    const todayFull = new Date().toISOString().split('T')[0]; // Ej: "2026-04-22"
-    const todayMonth = todayFull.substring(0, 7); // Ej: "2026-04"
+    const { data: session, status } = useSession();
+    const userRole = (session?.user as any)?.role?.toUpperCase() || "";
 
-    const [tipoVista, setTipoVista] = useState("DIA"); // 'DIA' o 'MES'
+    const todayFull = new Date().toISOString().split('T')[0]; 
+    const todayMonth = todayFull.substring(0, 7); 
+
+    const [tipoVista, setTipoVista] = useState("DIA"); 
     
-    // Inicializamos con la fecha completa
     const [fechaTarget, setFechaTarget] = useState(todayFull);
     const [loading, setLoading] = useState(false);
     
@@ -19,9 +22,23 @@ export default function ProyeccionGlobalPage() {
     const [datosStock, setDatosStock] = useState<any[]>([]);
     const [datosMenu, setDatosMenu] = useState<any[]>([]);
 
+    if (status === 'loading') {
+        return <div className="min-h-[60vh] flex justify-center items-center font-bold text-gray-500">Verificando accesos...</div>;
+    }
+
+    const PRIVILEGED_ROLES = ["GERENTE GENERAL", "ADMINISTRADOR GENERAL", "CEO"];
+    if (!PRIVILEGED_ROLES.includes(userRole)) {
+        return (
+            <div className="flex flex-col items-center justify-center min-h-[60vh]">
+                <span className="text-6xl mb-4">⛔</span>
+                <h1 className="text-2xl font-bold text-gray-800">Acceso Restringido</h1>
+                <p className="mt-2 text-gray-500">Tu rol actual no tiene permisos para realizar proyecciones a nivel cadena.</p>
+            </div>
+        );
+    }
+
     const formatMoneda = (valor: any) => new Intl.NumberFormat('en-US', { minimumFractionDigits: 2 }).format(Number(valor) || 0);
 
-    // ✨ EFECTO MAGICO: Cambia la fecha por defecto cuando cambias el tipo de vista
     useEffect(() => {
         if (tipoVista === "MES") {
             setFechaTarget(todayMonth);
@@ -31,11 +48,10 @@ export default function ProyeccionGlobalPage() {
     }, [tipoVista, todayMonth, todayFull]);
 
     const handleGenerar = async () => {
-        if (!fechaTarget) return alert("Selecciona una fecha u objetivo válido.");
+        if (!fechaTarget) return alert("Selecciona una fecha u objetivo valido.");
         
         setLoading(true);
         
-        // ✨ TRUCO BACKEND: Si es mes (YYYY-MM), le agregamos el "-01" para que SQL no dé error.
         const dateToSubmit = tipoVista === 'MES' ? `${fechaTarget}-01` : fechaTarget;
 
         const result = await generarProyeccion(0, dateToSubmit);
@@ -44,12 +60,9 @@ export default function ProyeccionGlobalPage() {
             const detallesResult = await obtenerDetalleProyeccion(result.projectionId);
 
             if (detallesResult.success) {
-                // ✨ NUEVA LÓGICA INTELIGENTE DE FECHAS
                 let multiplicador = 1;
                 if (tipoVista === 'MES') {
-                    // Extraemos el año y mes que el usuario eligió
                     const [year, month] = fechaTarget.split('-');
-                    // Date(year, month, 0) nos da mágicamente el último día de ese mes
                     const diasDelMes = new Date(Number(year), Number(month), 0).getDate();
                     multiplicador = diasDelMes; 
                 }
@@ -65,7 +78,6 @@ export default function ProyeccionGlobalPage() {
                     return acc;
                 }, []);
 
-                // APLICAMOS EL MULTIPLICADOR
                 const scaledHoras = groupedByHour.map((item: any) => ({
                     ...item,
                     total: item.total * multiplicador
@@ -87,7 +99,7 @@ export default function ProyeccionGlobalPage() {
                 setDatosMenu(scaledMenus);
             }
         } else {
-            alert(result.message || "Error al generar la proyección");
+            alert(result.message || "Error al generar la proyeccion");
         }
         setLoading(false);
     };
@@ -118,30 +130,28 @@ export default function ProyeccionGlobalPage() {
     return (
         <div className="p-6 w-full max-w-7xl mx-auto space-y-6">
             
-            {/* HEADER CORPORATIVO */}
             <div className="border-b border-gray-200 pb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
                     <h1 className="text-3xl font-black text-gray-900 flex items-center gap-2 tracking-tight">
                         <Globe className="text-purple-600 w-8 h-8" /> 
-                        Proyección Consolidada Global
+                        Proyeccion Consolidada Global
                     </h1>
-                    <p className="text-gray-500 mt-1.5 font-medium">Suma total de proyecciones, ingresos y logística de todas las sedes a nivel cadena.</p>
+                    <p className="text-gray-500 mt-1.5 font-medium">Suma total de proyecciones, ingresos y logistica de todas las sedes a nivel cadena.</p>
                 </div>
                 <div className="bg-purple-100 border border-purple-200 text-purple-800 px-4 py-1.5 rounded-full font-bold text-sm shadow-sm inline-flex items-center gap-1.5 self-start sm:self-auto">
                     <TrendingUp className="w-4 h-4" /> Modo Corporativo
                 </div>
             </div>
 
-            {/* CONTROLES GLOBALES */}
             <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col md:flex-row gap-5 items-end">
                 <div className="flex-1 w-full">
-                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">Rango de Proyección</label>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">Rango de Proyeccion</label>
                     <select 
                         value={tipoVista} 
                         onChange={(e) => setTipoVista(e.target.value)} 
                         className="w-full border border-gray-200 rounded-lg p-2.5 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all outline-none cursor-pointer"
                     >
-                        <option value="DIA">Vista por Día Específico</option>
+                        <option value="DIA">Vista por Dia Especifico</option>
                         <option value="MES">Vista Mensual Acumulada</option>
                     </select>
                 </div>
@@ -173,12 +183,10 @@ export default function ProyeccionGlobalPage() {
                 </button>
             </div>
 
-            {/* RESULTADOS */}
             {datosHora.length > 0 && (
                 <div className="space-y-6 animate-in fade-in duration-500">
                     
                     <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-                        {/* KPI PRINCIPAL */}
                         <div className="bg-gradient-to-br from-purple-600 to-purple-800 p-6 rounded-xl shadow-lg border border-purple-500 flex flex-col justify-center relative overflow-hidden">
                             <div className="absolute top-0 right-0 p-4 opacity-10">
                                 <Globe className="w-32 h-32" />
@@ -186,7 +194,7 @@ export default function ProyeccionGlobalPage() {
                             <div className="z-10">
                                 <h3 className="text-purple-200 font-bold uppercase tracking-wider text-sm mb-2 flex items-center gap-2">
                                     <AlertCircle className="w-4 h-4" />
-                                    Ingreso Global Estimado ({tipoVista === 'DIA' ? 'Día' : 'Mes'})
+                                    Ingreso Global Estimado ({tipoVista === 'DIA' ? 'Dia' : 'Mes'})
                                 </h3>
                                 <p className="text-5xl font-black text-white tracking-tight">
                                     S/ {formatMoneda(ingresosTotalesProyectados)}
@@ -194,19 +202,18 @@ export default function ProyeccionGlobalPage() {
                             </div>
                         </div>
                         
-                        {/* TABLA DE MENÚS CONSOLIDADA */}
                         <div className="xl:col-span-2 bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
                             <div className="p-5 border-b border-gray-100 bg-gray-50/80">
                                 <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
                                     <div className="p-1.5 bg-blue-100 rounded-lg"><Utensils className="text-blue-600 w-4 h-4" /></div>
-                                    Proyección por Menús (Nivel Cadena)
+                                    Proyeccion por Menus (Nivel Cadena)
                                 </h2>
                             </div>
                             <div className="w-full overflow-x-auto">
                                 <table className="min-w-full text-left text-sm whitespace-nowrap">
                                     <thead className="bg-white border-b border-gray-100">
                                         <tr>
-                                            <th className="p-4 pl-6 font-semibold text-gray-500 text-xs uppercase tracking-wider">Menú / Combo</th>
+                                            <th className="p-4 pl-6 font-semibold text-gray-500 text-xs uppercase tracking-wider">Menu / Combo</th>
                                             <th className="p-4 font-semibold text-gray-500 text-xs uppercase tracking-wider text-center">Cant. Proyectada</th>
                                             <th className="p-4 pr-6 font-semibold text-gray-500 text-xs uppercase tracking-wider text-right">Ingreso Estimado</th>
                                         </tr>
@@ -231,7 +238,6 @@ export default function ProyeccionGlobalPage() {
 
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
                         
-                        {/* GRÁFICA DE HORAS */}
                         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col h-full">
                             <div className="flex justify-between items-center mb-6">
                                 <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
@@ -262,12 +268,11 @@ export default function ProyeccionGlobalPage() {
                             </div>
                         </div>
 
-                        {/* LOGÍSTICA GLOBAL */}
                         <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col h-full">
                             <div className="p-5 border-b border-gray-100 bg-gray-50/80">
                                 <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
                                     <div className="p-1.5 bg-green-100 rounded-lg"><ShoppingCart className="text-green-600 w-4 h-4" /></div>
-                                    Logística Global (Centro de Acopio)
+                                    Logistica Global (Centro de Acopio)
                                 </h2>
                             </div>
                             <div className="w-full flex-1 overflow-x-auto">

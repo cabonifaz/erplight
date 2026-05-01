@@ -1,18 +1,24 @@
 'use client'
 
 import { useState, useEffect } from "react";
+import { useSession } from "next-auth/react"; 
 import { obtenerCierreMensual } from "@/actions/cierre-mensual-actions";
-import { getBranches } from "@/actions/admin-actions";
+// ✨ IMPORTAMOS LA FUNCIÓN SEGURA DEL BACKEND (En vez de getBranches)
+import { obtenerSucursales } from "@/actions/rrhh-actions"; 
 import { DollarSign, Receipt, Calculator, CalendarDays, TrendingUp, CreditCard } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
 
 export default function CierreMensualPage() {
+    // --- SESION PARA CONTROL DE ACCESOS ---
+    const { data: session, status } = useSession();
+    const userRole = (session?.user as any)?.role?.toUpperCase() || "";
+
     // --- ESTADOS PARA SUCURSALES ---
     const [sucursales, setSucursales] = useState<any[]>([]);
     const [cargandoSedes, setCargandoSedes] = useState(true);
 
     // --- ESTADOS DEL FORMULARIO ---
-    const [branchId, setBranchId] = useState("0"); // 0 = Todas las sedes
+    const [branchId, setBranchId] = useState("0"); 
     const [periodo, setPeriodo] = useState(""); 
     const [loading, setLoading] = useState(false);
     const [hasSearched, setHasSearched] = useState(false);
@@ -23,7 +29,6 @@ export default function CierreMensualPage() {
     const [datosTurnos, setDatosTurnos] = useState<any[]>([]);
     const [kpis, setKpis] = useState({ total_operaciones: 0, total_dinero: 0, ticket_promedio: 0 });
 
-    // ✨ FUNCIÓN PARA FORMATEAR MONEDA CON COMAS
     const formatMoneda = (valor: any) => {
         return new Intl.NumberFormat('en-US', { 
             minimumFractionDigits: 2,
@@ -31,30 +36,41 @@ export default function CierreMensualPage() {
         }).format(Number(valor) || 0);
     };
 
-    // ✨ FUNCIONES DE LIMPIEZA DE TURNOS
     const getShiftNameOnly = (val: any) => val ? String(val).replace(/^[0-9]+\.\s*/, '').split('(')[0].trim() : "";
     const getShiftFullName = (val: any) => val ? String(val).replace(/^[0-9]+\.\s*/, '').trim() : "";
 
-    // --- EFECTO INICIAL: CARGAR SUCURSALES ---
+    const PRIVILEGED_ROLES = ["GERENTE GENERAL", "ADMINISTRADOR GENERAL", "CEO"];
+    const isPrivileged = PRIVILEGED_ROLES.includes(userRole);
+
+    // --- EFECTO INICIAL: CARGAR SUCURSALES DESDE EL SERVIDOR ---
     useEffect(() => {
+        if (status === "loading") return;
+
         async function fetchSucursales() {
             try {
-                const result = await getBranches(); 
-                if (Array.isArray(result) && result.length > 0) {
-                    setSucursales(result);
+                // ✨ Usamos la función que hace el INNER JOIN seguro en el backend
+                const res = await obtenerSucursales(); 
+                
+                if (res.success && res.data.length > 0) {
+                    setSucursales(res.data);
+
+                    // Si el servidor nos dice que es admin de sucursal, lo bloquea en su ID real
+                    if (!isPrivileged && res.defaultBranchId) {
+                        setBranchId(String(res.defaultBranchId));
+                    }
                 } else {
-                    console.error("No se encontraron sucursales o el arreglo está vacío.");
+                    console.error("No se encontraron sucursales o no tienes permisos.");
                 }
             } catch (error) {
-                console.error("Error en la petición de sucursales", error);
+                console.error("Error en la peticion de sucursales", error);
             } finally {
                 setCargandoSedes(false);
             }
         }
         fetchSucursales();
-    }, []);
+    }, [status, isPrivileged]);
 
-    // --- FUNCIÓN DE BÚSQUEDA ---
+    // --- FUNCION DE BUSQUEDA ---
     const handleSearch = async () => {
         if (!periodo) return alert("Por favor selecciona un mes a consultar.");
         
@@ -67,7 +83,6 @@ export default function CierreMensualPage() {
             setDatosArticulos(result.articulos || []);
             setKpis(result.kpis || { total_operaciones: 0, total_dinero: 0, ticket_promedio: 0 });
 
-            // ✨ RELLENO DE TURNOS PARA EL MENSUAL (Misma lógica que el Diario)
             const turnosRecibidos = result.turnos || [];
             const turnosEstandar = [
                 { id: '1. Mañana', nombreCompleto: '1. Mañana (06:00 - 12:00)' },
@@ -101,7 +116,7 @@ export default function CierreMensualPage() {
                     <CalendarDays className={branchId === "0" ? "text-purple-600" : "text-blue-600"} /> 
                     {branchId === "0" ? "Cierre Mensual Consolidado" : "Cierre Mensual por Sucursal"}
                 </h1>
-                <p className="text-gray-600">Resumen macro-financiero y rendimiento acumulado del mes (Solo Días Cerrados).</p>
+                <p className="text-gray-600">Resumen macro-financiero y rendimiento acumulado del mes (Solo Dias Cerrados).</p>
             </div>
 
             {/* CONTROLES */}
@@ -111,10 +126,12 @@ export default function CierreMensualPage() {
                     <select 
                         value={branchId} 
                         onChange={(e) => setBranchId(e.target.value)} 
-                        className="w-full border border-gray-300 rounded-md p-2 font-semibold bg-white"
-                        disabled={cargandoSedes}
+                        className={`w-full border border-gray-300 rounded-md p-2 font-semibold ${sucursales.length === 1 ? 'bg-gray-100 cursor-not-allowed opacity-90 text-gray-700' : 'bg-white cursor-pointer'}`}
+                        disabled={cargandoSedes || sucursales.length === 1}
                     >
-                        <option value="0">TODAS LAS SEDES (Consolidado)</option>
+                        {isPrivileged && (
+                            <option value="0">TODAS LAS SEDES (Consolidado)</option>
+                        )}
                         {cargandoSedes ? (
                             <option value="" disabled>Cargando sedes...</option>
                         ) : (
@@ -174,7 +191,7 @@ export default function CierreMensualPage() {
                     </div>
 
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        {/* GRÁFICA DE RENDIMIENTO MENSUAL POR TURNO */}
+                        {/* GRAFICA DE RENDIMIENTO MENSUAL POR TURNO */}
                         <div className="bg-white border border-gray-200 rounded-lg p-5 shadow-sm">
                             <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
                                 <TrendingUp className="text-orange-500 w-5 h-5" /> Ingresos por Franja Horaria (Mensual)
@@ -184,7 +201,6 @@ export default function CierreMensualPage() {
                                     <BarChart data={datosTurnos} layout="vertical" margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
                                         <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e5e7eb" />
                                         <XAxis type="number" tickFormatter={(val) => `S/ ${formatMoneda(val)}`} stroke="#6b7280" />
-                                        {/* ✨ Aplicamos la nueva función limpiadora para el Eje Y */}
                                         <YAxis dataKey="rango_horas" type="category" width={90} tick={{fontSize: 12}} tickFormatter={getShiftNameOnly} stroke="#6b7280" />
                                         <RechartsTooltip 
                                             cursor={{fill: '#f3f4f6'}}
@@ -198,16 +214,16 @@ export default function CierreMensualPage() {
                             </div>
                         </div>
 
-                        {/* INGRESOS POR MÉTODO DE PAGO */}
+                        {/* INGRESOS POR METODO DE PAGO */}
                         <div className="bg-white border border-gray-200 rounded-lg p-5 shadow-sm">
                             <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
-                                <CreditCard className="text-green-600 w-5 h-5" /> Consolidado de Métodos de Pago
+                                <CreditCard className="text-green-600 w-5 h-5" /> Consolidado de Metodos de Pago
                             </h2>
                             <div className="overflow-hidden rounded-md border">
                                 <table className="min-w-full text-left text-sm">
                                     <thead className="bg-gray-50">
                                         <tr>
-                                            <th className="p-3 font-semibold text-gray-700">Método</th>
+                                            <th className="p-3 font-semibold text-gray-700">Metodo</th>
                                             <th className="p-3 font-semibold text-gray-700 text-center">Tx.</th>
                                             <th className="p-3 font-semibold text-gray-700 text-right">Monto Recaudado</th>
                                         </tr>
@@ -239,7 +255,7 @@ export default function CierreMensualPage() {
                                     <tr>
                                         <th className="p-3 font-semibold text-gray-700">Producto</th>
                                         <th className="p-3 font-semibold text-gray-700 text-center">Unidades Vendidas</th>
-                                        <th className="p-3 font-semibold text-blue-700 text-right">Facturación Total</th>
+                                        <th className="p-3 font-semibold text-blue-700 text-right">Facturacion Total</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
@@ -252,7 +268,7 @@ export default function CierreMensualPage() {
                                             </tr>
                                         ))
                                     ) : (
-                                        <tr><td colSpan={3} className="p-8 text-center text-gray-500">No hay platillos registrados en los días cerrados</td></tr>
+                                        <tr><td colSpan={3} className="p-8 text-center text-gray-500">No hay platillos registrados en los dias cerrados</td></tr>
                                     )}
                                 </tbody>
                             </table>

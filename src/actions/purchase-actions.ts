@@ -31,13 +31,17 @@ export interface Quotation {
 
 export async function getRequestDetails(requestId: number) {
     try {
-        // 🔥 1. Agregamos el (?) que faltaba en la llamada
+        // 🔥 1. Llamamos al SP original para el detalle de la orden
         const [results]: any = await pool.query("CALL sp_obtener_detalle_solicitud(?)", [requestId]);
         
+        // 🔥 2. Llamamos al nuevo SP exclusivo para traer las cotizaciones
+        const [cotizacionesResult]: any = await pool.query("CALL sp_obtener_cotizaciones_solicitud(?)", [requestId]);
+        
         return { 
-            // Si este SP no trae cotizaciones, lo dejamos como arreglo vacío para no romper el frontend
-            quotations: [], 
-            // 🔥 2. Leemos results[0][0] porque el SP solo tiene un SELECT principal
+            // cotizacionesResult[0] contiene el arreglo de archivos PDF devueltos por el SP
+            quotations: cotizacionesResult[0] || [], 
+            
+            // Leemos results[0][0] porque el SP solo tiene un SELECT principal
             request: results[0] ? results[0][0] : null 
         };
     } catch (error) {
@@ -251,7 +255,7 @@ export async function updatePurchaseRequest(prevState: ActionState | null, formD
                 const filePath = join(uploadDir, fileName);
                 await writeFile(filePath, Buffer.from(bytes));
                 const publicUrl = `/uploads/${fileName}`;
-                await connection.query("CALL sp_insertar_cotizacion(?, ?, ?)", [requestId, file.name, publicUrl]);
+               await connection.query("CALL sp_insertar_cotizacion(?, ?, ?)", [requestId, file.name, publicUrl]);
             }
         }
     }

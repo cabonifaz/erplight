@@ -5,6 +5,7 @@ import { pool } from "@/lib/db";
 import { revalidatePath } from "next/cache";
 import { writeFile, mkdir, unlink } from 'fs/promises'; // ✨ Agregamos unlink para borrar PDFs
 import path from 'path';
+import { auth } from "@/auth";
 
 
 // ... aquí sigue el resto de tu código ...
@@ -37,7 +38,19 @@ export async function crearEmpleado(data: any) {
         );
         return { success: true, message: "Empleado creado correctamente." };
     } catch (error: any) {
-        return { success: false, message: "Error al crear empleado." };
+        // ✨ Detectamos si el error es por un DNI duplicado en MySQL
+        if (error.code === 'ER_DUP_ENTRY' || (error.message && error.message.includes('Duplicate entry'))) {
+            return { 
+                success: false, 
+                message: "⚠️ Este número de documento ya pertenece a otro empleado registrado." 
+            };
+        }
+        
+        // Si es otro tipo de error, enviamos el mensaje real de SQL para saber qué pasa
+        return { 
+            success: false, 
+            message: error.sqlMessage || error.message || "Error desconocido al crear empleado." 
+        };
     } finally {
         connection.release();
     }
@@ -198,14 +211,46 @@ export async function verificarEstadoKiosko(documento: string) {
 }
 
 // 11. OBTENER LISTA DE SUCURSALES
+// 11. OBTENER LISTA DE SUCURSALES (CON FILTRO DE SEGURIDAD)
 export async function obtenerSucursales() {
+    const session = await auth();
+    if (!session?.user) return { success: false, data: [], defaultBranchId: 1 };
+
+    const userId = session.user.id;
+    const role = session.user.role?.toUpperCase() || "";
+
     const connection = await pool.getConnection();
     try {
+        // Obtenemos todas las sucursales del SP
         const [rows]: any = await connection.query("CALL sp_rrhh_obtener_sucursales()");
-        return { success: true, data: rows[0] };
+        const todasLasSucursales = rows[0] || [];
+
+        const PRIVILEGED_ROLES = ["GERENTE GENERAL", "ADMINISTRADOR GENERAL", "JEFE DE RRHH"];
+        
+        if (PRIVILEGED_ROLES.includes(role.replace(/_/g, ' '))) {
+            return { success: true, data: todasLasSucursales, defaultBranchId: 1 };
+        }
+
+        // Cruzamos con user_branches para administradores de sucursal
+        const [userBranches]: any = await connection.query(`
+            SELECT DISTINCT b.id, b.name 
+            FROM branches b
+            INNER JOIN user_branches ub ON b.id = ub.branch_id
+            WHERE ub.user_id = ? AND b.status = 1
+        `, [userId]);
+
+        if (userBranches.length > 0) {
+            return { 
+                success: true, 
+                data: userBranches, 
+                defaultBranchId: userBranches[0].id // Extraemos el ID real exacto
+            };
+        }
+
+        return { success: true, data: [], defaultBranchId: 1 };
     } catch (error) {
         console.error("Error al obtener sucursales:", error);
-        return { success: false, data: [] };
+        return { success: false, data: [], defaultBranchId: 1 };
     } finally {
         connection.release();
     }

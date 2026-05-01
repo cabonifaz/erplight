@@ -22,16 +22,18 @@ const getLunes = (d: Date) => {
 
 export default function RRHHPage() {
     const { data: session, status } = useSession(); 
-    const rolCrudo = (session?.user as any)?.role || 'GERENTE_GENERAL'; 
-    // ✨ NUEVO: Cambiamos replace por replaceAll para formatear 'JEFE DE RRHH' a 'JEFE_DE_RRHH'
+    const sessionUser = session?.user as any;
+    
+    const rolCrudo = sessionUser?.role || 'GERENTE_GENERAL'; 
     const rolUsuario = rolCrudo.toUpperCase().replaceAll(' ', '_'); 
-    const sucursalUsuario = (session?.user as any)?.branch_id || 1;
 
     const [activeTab, setActiveTab] = useState('empleados'); 
     const [loading, setLoading] = useState(false);
     
     const [sucursales, setSucursales] = useState<any[]>([]);
-    const [sucursalActiva, setSucursalActiva] = useState<number>(rolUsuario === 'ADMIN_SUCURSAL' ? sucursalUsuario : 1); 
+    
+    // Inicia en 0 para que muestre "Cargando..." hasta recibir la sede real
+    const [sucursalActiva, setSucursalActiva] = useState<number>(0); 
     
     const [empleados, setEmpleados] = useState<any[]>([]);
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -79,8 +81,8 @@ export default function RRHHPage() {
     });
 
     const nombresDiasFijos = [
-        { id: 1, nombre: 'Lunes' }, { id: 2, nombre: 'Martes' }, { id: 3, nombre: 'Miércoles' },
-        { id: 4, nombre: 'Jueves' }, { id: 5, nombre: 'Viernes' }, { id: 6, nombre: 'Sábado' }, { id: 7, nombre: 'Domingo' }
+        { id: 1, nombre: 'Lunes' }, { id: 2, nombre: 'Martes' }, { id: 3, nombre: 'Miercoles' },
+        { id: 4, nombre: 'Jueves' }, { id: 5, nombre: 'Viernes' }, { id: 6, nombre: 'Sabado' }, { id: 7, nombre: 'Domingo' }
     ];
 
     const cambiarSemana = (dias: number) => {
@@ -93,18 +95,25 @@ export default function RRHHPage() {
         const initData = async () => {
             const resCat = await obtenerCatalogosRRHH();
             if (resCat.success) { setListaDocumentos(resCat.documentos); setListaCargos(resCat.cargos); }
+            
             const resSuc = await obtenerSucursales();
             if (resSuc.success) {
                 setSucursales(resSuc.data);
-                if (rolUsuario === 'ADMIN_SUCURSAL' && sucursalUsuario) setSucursalActiva(sucursalUsuario);
+                // El servidor manda el ID exacto que le corresponde
+                if (resSuc.defaultBranchId) {
+                    setSucursalActiva(resSuc.defaultBranchId);
+                } else {
+                    setSucursalActiva(1);
+                }
             }
         };
-        // ✨ NUEVO: Agregamos JEFE_DE_RRHH para que cargue los datos iniciales
+        
         if (rolUsuario === 'GERENTE_GENERAL' || rolUsuario === 'ADMIN_SUCURSAL' || rolUsuario === 'JEFE_DE_RRHH') initData();
-    }, [rolUsuario, sucursalUsuario]);
+    }, [rolUsuario]);
 
     useEffect(() => {
-        if (sucursalActiva) {
+        // Solo carga datos si la sucursal ya no es 0
+        if (sucursalActiva > 0) {
             cargarDatosSucursal();
             setEmpleadoMarcacion('');
             setReporteDatos([]);
@@ -228,7 +237,7 @@ export default function RRHHPage() {
     };
 
     const handleEliminarTurnoCelda = async () => {
-        if (!confirm('¿Estás seguro de eliminar este turno?')) return;
+        if (!confirm('Esta seguro de eliminar este turno?')) return;
         setLoading(true);
         const res = await eliminarHorarioEmpleado(modalTurno.empId, modalTurno.fechaStr);
         if(res.success) {
@@ -239,7 +248,7 @@ export default function RRHHPage() {
     };
 
     const handleAutogenerar = async () => {
-        if (!confirm("Esto asignará turnos automáticamente (en borrador) según la disponibilidad de cada empleado para esta semana. ¿Continuar?")) return;
+        if (!confirm("Esto asignara turnos automaticamente (en borrador) segun la disponibilidad de cada empleado para esta semana. Continuar?")) return;
         setLoading(true);
         const fechaFin = new Date(semanaActual);
         fechaFin.setDate(fechaFin.getDate() + 6); 
@@ -250,7 +259,7 @@ export default function RRHHPage() {
     };
 
     const handlePublicar = async () => {
-        if (!confirm("¿Estás seguro de APLICAR todos los borradores de esta semana? Ya no podrán ser modificados sin dejar rastro.")) return;
+        if (!confirm("Esta seguro de APLICAR todos los borradores de esta semana? Ya no podran ser modificados sin dejar rastro.")) return;
         setLoading(true);
         const fechaFin = new Date(semanaActual);
         fechaFin.setDate(fechaFin.getDate() + 6); 
@@ -288,7 +297,7 @@ export default function RRHHPage() {
         setLoading(true);
         const datosParaGuardar = dispData.filter(d => d.activo).map(d => ({ dia_semana: d.dia_semana, hora_inicio: d.inicio, hora_fin: d.fin }));
         const res = await guardarDisponibilidad(dispEmp.id, datosParaGuardar);
-        if (res.success) { setIsDispModalOpen(false); alert("¡Disponibilidad guardada con éxito!"); } 
+        if (res.success) { setIsDispModalOpen(false); alert("Disponibilidad guardada con exito!"); } 
         else alert(res.message);
         setLoading(false);
     };
@@ -341,7 +350,7 @@ export default function RRHHPage() {
         const res = await subirContratoEmpleado(formData);
         
         if (res.success) {
-            alert("✅ " + res.message);
+            alert("Exito: " + res.message);
             setNuevoContratoFecha(''); 
             if(fileInputRef.current) fileInputRef.current.value = '';
             
@@ -349,13 +358,13 @@ export default function RRHHPage() {
             if (listRes.success) setContratosLista(listRes.data);
             cargarDatosSucursal(); 
         } else {
-            alert("❌ Error: " + res.message);
+            alert("Error: " + res.message);
         }
         setSubiendoContrato(false);
     };
 
     const handleEliminarContrato = async (idContrato: number, urlArchivo: string) => {
-        if (!confirm("¿Seguro que deseas eliminar este contrato? Esta acción no se puede deshacer.")) return;
+        if (!confirm("Seguro que deseas eliminar este contrato? Esta accion no se puede deshacer.")) return;
         
         const res = await eliminarContratoEmpleado(idContrato, urlArchivo);
         if (res.success) {
@@ -363,7 +372,7 @@ export default function RRHHPage() {
             if (listRes.success) setContratosLista(listRes.data);
             cargarDatosSucursal(); 
         } else {
-            alert("❌ Error al eliminar: " + res.message);
+            alert("Error al eliminar: " + res.message);
         }
     };
 
@@ -381,7 +390,6 @@ export default function RRHHPage() {
 
     if (status === 'loading') return <div className="min-h-[60vh] flex justify-center items-center font-bold text-gray-500">Cargando credenciales...</div>;
 
-    // ✨ NUEVO: Damos acceso al JEFE DE RRHH
     if (rolUsuario !== 'GERENTE_GENERAL' && rolUsuario !== 'ADMIN_SUCURSAL' && rolUsuario !== 'JEFE_DE_RRHH') {
         return ( 
             <div className="flex flex-col items-center justify-center min-h-[60vh]">
@@ -403,11 +411,10 @@ export default function RRHHPage() {
             <div className="border-b pb-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">👥 Recursos Humanos</h1>
-                    <p className="text-gray-600">Gestión de personal, horarios y control de asistencia.</p>
+                    <p className="text-gray-600">Gestion de personal, horarios y control de asistencia.</p>
                 </div>
                 <div className="flex items-center gap-3 bg-blue-50 p-2 px-4 rounded-lg border border-blue-100 shadow-sm">
                     <span className="text-sm font-bold text-blue-800">🏢 Sede:</span>
-                    {/* ✨ NUEVO: El jefe de RRHH también ve el selector de sucursales */}
                     {rolUsuario === 'GERENTE_GENERAL' || rolUsuario === 'JEFE_DE_RRHH' ? (
                         <select className="p-2 border border-blue-200 rounded-md bg-white text-sm focus:ring-2 focus:ring-blue-500 font-medium cursor-pointer" value={sucursalActiva} onChange={(e) => setSucursalActiva(Number(e.target.value))}>
                             {sucursales.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -425,7 +432,6 @@ export default function RRHHPage() {
 
             <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 min-h-[400px]">
                 
-                {/* -------------------- TAB 1: EMPLEADOS -------------------- */}
                 {activeTab === 'empleados' && (
                     <div>
                         <div className="flex justify-between items-center mb-6">
@@ -447,7 +453,7 @@ export default function RRHHPage() {
                                                     <td className="p-3 font-medium text-gray-800">
                                                         {emp.nombre_completo}
                                                         {emp.dias_vencimiento_contrato !== null && emp.dias_vencimiento_contrato !== undefined && emp.dias_vencimiento_contrato <= 10 && emp.dias_vencimiento_contrato >= 0 && (
-                                                            <span title={`El contrato vence en ${emp.dias_vencimiento_contrato} días`} className="ml-2 bg-red-100 text-red-700 text-[10px] px-2 py-0.5 rounded-full font-bold border border-red-200">
+                                                            <span title={`El contrato vence en ${emp.dias_vencimiento_contrato} dias`} className="ml-2 bg-red-100 text-red-700 text-[10px] px-2 py-0.5 rounded-full font-bold border border-red-200">
                                                                 🔴 Vence pronto
                                                             </span>
                                                         )}
@@ -473,7 +479,6 @@ export default function RRHHPage() {
                     </div>
                 )}
                 
-                {/* -------------------- TAB 2: ASISTENCIA -------------------- */}
                 {activeTab === 'asistencia' && (
                     <div className="flex flex-col items-center py-6">
                         <h2 className="text-2xl font-bold text-gray-800 mb-2">Reloj de Control de Personal</h2>
@@ -493,18 +498,17 @@ export default function RRHHPage() {
                     </div>
                 )}
 
-                {/* -------------------- TAB 3: HORARIOS -------------------- */}
                 {activeTab === 'horarios' && (
                     <div className="space-y-6">
                         <div className="flex flex-col sm:flex-row justify-between items-center bg-gray-50 p-4 rounded-xl border border-gray-200">
                             <div>
                                 <h2 className="text-xl font-bold text-gray-800">Horarios Rotativos</h2>
-                                <p className="text-sm text-gray-500">Asigna turnos por fechas específicas.</p>
+                                <p className="text-sm text-gray-500">Asigna turnos por fechas especificas.</p>
                             </div>
                             <div className="flex items-center gap-4 mt-4 sm:mt-0">
-                                <button onClick={() => cambiarSemana(-7)} className="p-2 bg-white border border-gray-300 rounded hover:bg-gray-100 font-bold px-4 shadow-sm">← Anterior</button>
+                                <button onClick={() => cambiarSemana(-7)} className="p-2 bg-white border border-gray-300 rounded hover:bg-gray-100 font-bold px-4 shadow-sm">Anterior</button>
                                 <span className="font-bold text-blue-800 text-lg uppercase tracking-wide min-w-[180px] text-center">{tituloSemana}</span>
-                                <button onClick={() => cambiarSemana(7)} className="p-2 bg-white border border-gray-300 rounded hover:bg-gray-100 font-bold px-4 shadow-sm">Siguiente →</button>
+                                <button onClick={() => cambiarSemana(7)} className="p-2 bg-white border border-gray-300 rounded hover:bg-gray-100 font-bold px-4 shadow-sm">Siguiente</button>
                             </div>
                         </div>
 
@@ -582,7 +586,6 @@ export default function RRHHPage() {
                     </div>
                 )}
 
-                {/* -------------------- TAB 4: REPORTES -------------------- */}
                 {activeTab === 'reportes' && (
                     <div className="space-y-6">
                         <div className="flex flex-col sm:flex-row justify-between items-center bg-blue-50 p-6 rounded-xl border border-blue-100 shadow-sm">
@@ -647,7 +650,6 @@ export default function RRHHPage() {
                 )}
             </div>
 
-            {/* -------------------- MODAL: CREAR/EDITAR EMPLEADO -------------------- */}
             {isModalOpen && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]">
                     <div className="bg-white p-6 rounded-lg shadow-2xl w-full max-w-lg">
@@ -679,7 +681,7 @@ export default function RRHHPage() {
                                     </select>
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-bold text-gray-700 mb-1">Número de Doc.</label>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Numero de Doc.</label>
                                     <input type="text" className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500" value={formData.numero_documento} onChange={e => setFormData({...formData, numero_documento: e.target.value})} />
                                 </div>
                             </div>
@@ -721,13 +723,12 @@ export default function RRHHPage() {
                 </div>
             )}
 
-            {/* -------------------- MODAL: DISPONIBILIDAD -------------------- */}
             {isDispModalOpen && (
                 <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[70]">
                     <div className="bg-white p-6 rounded-2xl shadow-2xl w-full max-w-lg">
                         <div className="border-b pb-3 mb-4">
                             <h3 className="text-xl font-bold text-gray-800">Reglas de Disponibilidad</h3>
-                            <p className="text-sm text-gray-500">Configura qué días y a qué hora puede trabajar <strong>{dispEmp.nombre}</strong>.</p>
+                            <p className="text-sm text-gray-500">Configura que dias y a que hora puede trabajar {dispEmp.nombre}.</p>
                         </div>
                         <div className="space-y-3 max-h-[50vh] overflow-y-auto pr-2">
                             {dispData.map((dia) => (
@@ -752,7 +753,6 @@ export default function RRHHPage() {
                 </div>
             )}
 
-            {/* -------------------- MODAL: ASIGNAR TURNO EN EL PLANIFICADOR -------------------- */}
             {modalTurno.isOpen && (
                 <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[80]">
                     <div className="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-sm">
@@ -793,14 +793,13 @@ export default function RRHHPage() {
                 </div>
             )}
 
-            {/* ✨ -------------------- MODAL: CONTRATOS COMPLETADO -------------------- ✨ */}
             {isContratoModalOpen && (
                 <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[90]">
                     <div className="bg-white p-6 rounded-2xl shadow-2xl w-full max-w-2xl">
                         <div className="flex justify-between items-center border-b pb-3 mb-4">
                             <div>
                                 <h3 className="text-xl font-bold text-gray-800">Contratos PDF</h3>
-                                <p className="text-sm text-gray-500">Historial de contratos de <strong>{contratoEmp.nombre}</strong></p>
+                                <p className="text-sm text-gray-500">Historial de contratos de {contratoEmp.nombre}</p>
                             </div>
                             <button onClick={() => setIsContratoModalOpen(false)} className="text-gray-400 hover:text-gray-600 text-2xl font-bold">&times;</button>
                         </div>
@@ -879,7 +878,6 @@ export default function RRHHPage() {
                 </div>
             )}
 
-            {/* -------------------- MODAL: DETALLE DE HORAS -------------------- */}
             {isDetalleModalOpen && (
                 <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[100] p-4">
                     <div className="bg-white p-0 rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[85vh]">

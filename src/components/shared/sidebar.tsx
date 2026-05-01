@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import Image from "next/image"; // ✨ IMPORTAMOS EL COMPONENTE DE IMAGEN DE NEXT.JS
+import Image from "next/image"; 
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { 
@@ -11,7 +11,7 @@ import {
   Upload, History, TrendingUp, BarChart, Globe, CalendarDays,
   Building2, Briefcase
 } from "lucide-react";
-import { getLogoUrl } from "@/actions/client-actions"; // ✨ IMPORTAMOS LA ACCIÓN QUE CREASTE
+import { getLogoUrl } from "@/actions/client-actions"; 
 
 interface MenuItem {
   label: string;
@@ -63,9 +63,8 @@ export function Sidebar({ user }: { user?: any }) {
   const pathname = usePathname();
   const [searchTerm, setSearchTerm] = useState("");
   const [openMenus, setOpenMenus] = useState<Record<string, boolean>>({ "Ventas & OC": true });
-  const [logoUrl, setLogoUrl] = useState<string>(""); // ✨ ESTADO PARA GUARDAR LA URL DEL LOGO
+  const [logoUrl, setLogoUrl] = useState<string>(""); 
 
-  // ✨ AL CARGAR EL SIDEBAR, BUSCAMOS LA URL EN LA BD
   useEffect(() => {
       const fetchLogo = async () => {
           const res = await getLogoUrl();
@@ -98,11 +97,46 @@ export function Sidebar({ user }: { user?: any }) {
     ? [...menuItems, ...adminItems] 
     : menuItems;
 
-  const displayItems = allAvailableItems.filter(item => {
-    if (item.label === "Ventas & OC" || item.label === "RRHH") {
-      return user?.role === "GERENTE GENERAL" || user?.role === "ADMIN_SUCURSAL";
+ const displayItems = allAvailableItems.filter(item => {
+    const rol = user?.role?.toUpperCase().trim() || "";
+    const isJefeRRHH = rol === "JEFE DE RRHH" || rol === "JEFE_RRHH";
+
+    // ✨ REGLA 1: El Jefe de RRHH SOLO ve Dashboard y RRHH
+    if (isJefeRRHH) {
+      return item.label === "Dashboard" || item.label === "RRHH";
     }
-    return true; 
+
+    // Regla 2: Quiénes ven Ventas y RRHH (Para el resto de roles)
+    if (item.label === "Ventas & OC" || item.label === "RRHH") {
+      return rol === "GERENTE GENERAL" || 
+             rol === "ADMIN_SUCURSAL" || 
+             rol === "ADMINISTRADOR_ZONAL" || 
+             rol === "ADMINISTRADOR ZONAL";
+    }
+
+    // Regla 3: Bloquear "Reportes" para el Almacenero
+    if (item.label === "Reportes") {
+      return rol !== "ALMACENERO"; 
+    }
+
+    return true; // Mostrar lo demás a los que no cayeron en filtros anteriores
+  }).map(item => {
+    
+    // Logica para ocultar reportes globales al admin de sucursal
+    if (item.label === "Reportes" && item.subItems) {
+      const isPrivileged = user?.role === "GERENTE GENERAL" || user?.role === "CEO" || user?.role === "ADMINISTRADOR GENERAL";
+      
+      if (!isPrivileged) {
+        return {
+          ...item,
+          subItems: item.subItems.filter(sub => 
+            sub.label !== "Dashboard Corporativo" && 
+            sub.label !== "Proyección Global"
+          )
+        };
+      }
+    }
+    return item;
   });
 
   const filteredItems = displayItems.filter((item) => {
@@ -114,15 +148,14 @@ export function Sidebar({ user }: { user?: any }) {
   return (
     <aside className="w-64 bg-white border-r border-gray-200 hidden md:flex flex-col h-screen fixed left-0 top-0 z-10">
       
-      {/* ✨ AQUÍ REEMPLAZAMOS EL TEXTO POR LA IMAGEN DINÁMICA */}
       <div className="h-16 flex items-center justify-center px-4 border-b border-gray-200">
           {logoUrl ? (
               <Image 
                   src={logoUrl} 
                   alt="Logo Empresa" 
-                  width={200}         // Le damos más ancho permitido
-                  height={55}         // Le damos más alto permitido
-                  className="object-contain max-h-[60px] w-auto" // Dejamos que ocupe casi todos los 64px del contenedor
+                  width={200}        
+                  height={55}        
+                  className="object-contain max-h-[60px] w-auto" 
                   priority 
               />
           ) : (

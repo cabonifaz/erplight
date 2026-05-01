@@ -3,16 +3,35 @@
 import { pool } from "@/lib/db";
 import { auth } from "@/auth";
 
-export async function getDashboardInteligente() {
+export async function getDashboardInteligente(sucursalSeleccionada?: string) {
     const session = await auth();
     if (!session?.user) return null;
 
-    const role = session.user.role?.toUpperCase() || "";
-    // @ts-ignore
-    const branchId = session.user.branch_id || 1;
+    const role = session.user.role?.toUpperCase().trim() || "";
+    const sessionUser = session.user as any;
     
-    // Obtenemos la fecha de hoy en formato YYYY-MM-DD (Ajustado a hora de Perú)
-    const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Lima' }).split('/').reverse().join('-');
+    // Obtenemos el ID del usuario (NextAuth suele guardarlo en .id, .sub o .userId)
+    const userId = sessionUser.id || sessionUser.sub || sessionUser.userId || sessionUser.id_usuario;
+
+    // Búsqueda de Sede Principal por defecto
+    let branchId = sessionUser.branch_id || sessionUser.branchId || sessionUser.sede_id || sessionUser.id_sucursal;
+    
+    if (!branchId) {
+        branchId = 1; // Default
+    } else {
+        branchId = parseInt(branchId);
+    }
+
+    // Generación de fecha
+    const formatter = new Intl.DateTimeFormat('es-PE', {
+        timeZone: 'America/Lima',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+    });
+    
+    const [dia, mes, anio] = formatter.format(new Date()).split('/');
+    const hoy = `${anio}-${mes}-${dia}`;
 
     const connection = await pool.getConnection();
     
@@ -27,7 +46,7 @@ export async function getDashboardInteligente() {
             };
         } 
         
-        else if (role === 'GERENTE GENERAL' || role === 'GERENTE DE LOGISTICA') {
+        else if (role === 'GERENTE GENERAL' || role === 'GERENTE DE LOGISTICA' || role === 'CEO') {
             const [results]: any = await connection.query("CALL sp_dashboard_gerencia(?)", [hoy]);
             return {
                 role: 'GERENTE',
@@ -36,20 +55,76 @@ export async function getDashboardInteligente() {
                 topVendidos: results[2] || []
             };
         } 
+
+        // ✨ BLOQUE DEL JEFE DE RRHH
+        else if (role === 'JEFE DE RRHH' || role === 'JEFE_RRHH') {
+            const [results]: any = await connection.query("CALL sp_dashboard_rrhh(?)", [hoy]);
+            return {
+                role: 'JEFE_RRHH',
+                kpis: results[0][0] || { total_empleados: 0, turnos_hoy: 0 },
+                turnosGlobales: results[1] || []
+            };
+        }
+        // ✨ BLOQUE DEL ZONAL CORREGIDO: Consulta en VIVO a tu tabla user_branches
+        else if (role === 'ADMINISTRADOR_ZONAL' || role === 'ADMINISTRADOR ZONAL') {
+            
+            // 🌟 CORRECCIÓN: Agregamos DISTINCT para eliminar los duplicados mágicamente
+            const [sedesAsignadas]: any = await connection.query(
+                `SELECT DISTINCT b.id, b.name 
+                 FROM user_branches ub 
+                 JOIN branches b ON ub.branch_id = b.id 
+                 WHERE ub.user_id = ?`, 
+                [userId]
+            );
+
+            // 2. Extraemos los IDs encontrados y los unimos con comas (Ej: "4,5,6")
+            let assignedBranchesString = "1"; // Default por si acaso
+            if (sedesAsignadas && sedesAsignadas.length > 0) {
+                assignedBranchesString = sedesAsignadas.map((s: any) => s.id).join(',');
+            }
+
+            // 3. Ejecutamos la lógica según lo que seleccionó
+            if (sucursalSeleccionada && sucursalSeleccionada !== "") {
+                const [results]: any = await connection.query("CALL sp_dashboard_admin(?, ?)", [parseInt(sucursalSeleccionada), hoy]);
+                return {
+                    role: 'ADMIN_SUCURSAL', 
+                    isZonal: true,          
+                    listaSedes: sedesAsignadas, // Pasamos la lista real extraída de la BD
+                    kpis: results[0][0] || { venta_real: 0, venta_proyectada: 0, items_criticos: 0 },
+                    topProyectados: results[1] || [],
+                    turnos: results[2] || []
+                };
+            } 
+            else {
+                // Pasamos el string de IDs dinámico (ej: "4,5,6") a tu Procedimiento Almacenado Zonal
+                const [results]: any = await connection.query("CALL sp_dashboard_zonal(?, ?)", [assignedBranchesString, hoy]);
+                return {
+                    role: 'ADMIN_SUCURSAL', 
+                    isZonal: true,
+                    listaSedes: sedesAsignadas, // Pasamos la lista real extraída de la BD
+                    kpis: results[0][0] || { venta_real: 0, venta_proyectada: 0, items_criticos: 0 },
+                    topProyectados: results[1] || [],
+                    turnos: results[2] || []
+                };
+            }
+        }
         
         else {
-            // Por defecto para Administradores de Sucursal o roles estándar
             const [results]: any = await connection.query("CALL sp_dashboard_admin(?, ?)", [branchId, hoy]);
             return {
                 role: 'ADMIN_SUCURSAL',
+                isZonal: false,
                 kpis: results[0][0] || { venta_real: 0, venta_proyectada: 0, items_criticos: 0 },
                 topProyectados: results[1] || [],
                 turnos: results[2] || []
             };
         }
-    } catch (error) {
-        console.error("Error cargando dashboard principal:", error);
-        return null;
+    } catch (error: any) {
+        console.error("Error SQL:", error.message);
+        return {
+            role: 'ERROR',
+            message: error.message || "Error desconocido en la BD"
+        };
     } finally {
         connection.release();
     }

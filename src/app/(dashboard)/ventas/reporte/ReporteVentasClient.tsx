@@ -4,6 +4,11 @@ import { useState, useEffect } from "react";
 import { getReporteVentas, obtenerLimiteDiasReporte } from "@/actions/sale-actions";
 
 export default function ReporteVentasClient({ sucursales, metodosPago }: { sucursales: any[], metodosPago: any[] }) {
+  // ✨ 1. FILTRO ANTI-DUPLICADOS (Por si acaso la BD manda repetidos)
+  const sucursalesUnicas = sucursales.filter((branch, index, self) =>
+    index === self.findIndex((b) => b.id === branch.id)
+  );
+
   const [ventas, setVentas] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
@@ -11,9 +16,9 @@ export default function ReporteVentasClient({ sucursales, metodosPago }: { sucur
   // Estado: Guardará el límite máximo de días configurado en BD
   const [maxDiasPermitidos, setMaxDiasPermitidos] = useState<number | null>(null);
 
-  // Estados de los Filtros
+  // ✨ 2. ESTADOS DE LOS FILTROS (Auto-selección inteligente)
   const [filtros, setFiltros] = useState({
-    branchId: "",
+    branchId: sucursalesUnicas.length === 1 ? String(sucursalesUnicas[0].id) : "",
     fechaInicio: "",
     fechaFin: "",
     metodoPago: ""
@@ -107,12 +112,17 @@ export default function ReporteVentasClient({ sucursales, metodosPago }: { sucur
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Sucursal</label>
             <select 
-              className="w-full p-2 border border-gray-300 rounded-md text-sm focus:ring-blue-500 focus:border-blue-500"
+              className={`w-full p-2 border border-gray-300 rounded-md text-sm focus:ring-blue-500 focus:border-blue-500 ${sucursalesUnicas.length === 1 ? 'cursor-not-allowed opacity-80 font-bold bg-gray-50' : 'cursor-pointer'}`}
               value={filtros.branchId}
+              disabled={sucursalesUnicas.length === 1}
               onChange={e => setFiltros({...filtros, branchId: e.target.value})}
             >
-              <option value="">Todas las sucursales</option>
-              {sucursales.map(s => (
+              {/* ✨ LE CAMBIAMOS EL TEXTO PARA QUE SEA 100% CLARO */}
+              {sucursalesUnicas.length !== 1 && (
+                <option value=""> Todas mis sucursales asignadas</option>
+              )}
+              
+              {sucursalesUnicas.map(s => (
                 <option key={s.id} value={s.id}>{s.name}</option>
               ))}
             </select>

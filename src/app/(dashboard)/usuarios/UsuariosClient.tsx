@@ -5,6 +5,9 @@ import { createUser, adminCambiarPassword, adminToggleEstadoUsuario } from "@/ac
 import { toast } from "sonner"; 
 import { Lock, UserX, UserCheck } from "lucide-react"; 
 
+// ✨ 1. Declaramos los roles globales AFUERA del componente
+const ROLES_GLOBALES = ["GERENTE GENERAL", "GERENTE DE LOGISTICA", "JEFE DE RRHH"];
+
 export default function UsuariosClient({ users, branches }: { users: any[], branches: any[] }) {
     const [role, setRole] = useState("ADMIN_SUCURSAL");
     const [selectedBranches, setSelectedBranches] = useState<number[]>([]);
@@ -21,28 +24,24 @@ export default function UsuariosClient({ users, branches }: { users: any[], bran
         );
     };
 
-    // ✨ NUEVO: Incluimos al JEFE DE RRHH como rol global
-    const isGlobalRole = role === "GERENTE GENERAL" || role === "GERENTE DE LOGISTICA" || role === "JEFE DE RRHH";
+    // ✨ 2. Validamos si el rol seleccionado en el formulario es global
+    const isGlobalRole = ROLES_GLOBALES.includes(role);
 
     const submitUser = createUser.bind(null, selectedBranches);
 
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    
-    // VALIDACIÓN PREVIA:
-    // Si NO es un rol global y no hay sucursales, detenemos y avisamos.
-    if (!isGlobalRole && selectedBranches.length === 0) {
-        return toast.error("Debes asignar al menos una sucursal para este rol.");
-    }
-
-    setLoading(true);
-    const form = e.currentTarget; 
-    const formData = new FormData(form);
-    
-    // Si es Global, enviamos un array vacío o un ID por defecto (ej. 0 o 1) 
-    // según como lo espere tu base de datos para la oficina central.
-    const result = await submitUser(formData);
+        e.preventDefault();
         
+        if (!isGlobalRole && selectedBranches.length === 0) {
+            return toast.error("Debes asignar al menos una sucursal para este rol.");
+        }
+
+        setLoading(true);
+        const form = e.currentTarget; 
+        const formData = new FormData(form);
+        
+        const result = await submitUser(formData);
+            
         setLoading(false);
 
         if (result?.success) {
@@ -114,7 +113,6 @@ export default function UsuariosClient({ users, branches }: { users: any[], bran
                             >
                                 <option value="GERENTE GENERAL">Gerente General</option>
                                 <option value="GERENTE DE LOGISTICA">Gerente de Logística</option>
-                                {/* ✨ NUEVO: Opción de Jefe de RRHH */}
                                 <option value="JEFE DE RRHH">Jefe de RRHH</option>
                                 <option value="ADMINISTRADOR_ZONAL">Administrador Zonal</option>
                                 <option value="ADMIN_SUCURSAL">Administrador de Sucursal</option>
@@ -124,7 +122,6 @@ export default function UsuariosClient({ users, branches }: { users: any[], bran
                         </div>
                     </div>
 
-                    {/* ✨ NUEVO: Ocultamos si es un rol global (isGlobalRole) */}
                     <div className={`p-4 border rounded-md bg-gray-50 ${isGlobalRole ? 'hidden' : 'block'}`}>
                         <label className="block text-sm font-semibold text-gray-800 mb-2">Asignar Sucursales (Obligatorio)</label>
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
@@ -171,6 +168,10 @@ export default function UsuariosClient({ users, branches }: { users: any[], bran
                         {users.map((user: any) => {
                             const estadoActual = user.status !== undefined ? user.status : 1;
                             
+                            // ✨ 3. CORRECCIÓN AQUÍ: Forzamos el tipo `as string[]` para que TypeScript no arroje error
+                            const sucursalesRaw = user.assigned_branches ? user.assigned_branches.split(',') : [];
+                            const sucursalesLimpias = Array.from(new Set(sucursalesRaw.map((s: string) => s.trim()))).filter(Boolean) as string[];
+
                             return (
                                 <tr key={user.id} className={estadoActual === 0 ? "bg-red-50/50 opacity-75" : ""}>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{user.name}</td>
@@ -181,9 +182,40 @@ export default function UsuariosClient({ users, branches }: { users: any[], bran
                                             {user.role}
                                         </span>
                                     </td>
-                                    <td className="px-6 py-4 text-sm text-gray-500">
-                                        {user.assigned_branches || 'Sin asignar'}
+                                    
+                                    {/* ✨ 4. Mostramos las etiquetas (badges) para las sucursales asignadas */}
+                                    <td className="px-6 py-4 text-sm text-gray-500 min-w-[250px] max-w-[350px]">
+                                        {ROLES_GLOBALES.includes(user.role) ? (
+                                            <span className="inline-flex items-center font-bold text-blue-900 bg-blue-50 px-2.5 py-0.5 rounded-md border border-blue-100 text-[10px] uppercase tracking-wider">
+                                                Acceso Global
+                                            </span>
+                                        ) : sucursalesLimpias.length > 0 ? (
+                                            <div className="flex flex-wrap gap-1.5 items-center">
+                                                {/* ✨ Quitamos la declaración explícita (sede: string, idx: number) */}
+                                                {sucursalesLimpias.slice(0, 2).map((sede, idx) => (
+                                                    <span 
+                                                        key={idx} 
+                                                        className="inline-flex items-center px-2 py-1 rounded-md text-[10px] font-medium bg-white text-gray-700 border border-gray-200 shadow-sm truncate max-w-[160px]" 
+                                                        title={sede}
+                                                    >
+                                                        {sede}
+                                                    </span>
+                                                ))}
+                                                
+                                                {sucursalesLimpias.length > 2 && (
+                                                    <span 
+                                                        className="inline-flex items-center px-2 py-1 rounded-md text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200 cursor-help hover:bg-slate-200 transition-colors" 
+                                                        title={`Otras sedes:\n${sucursalesLimpias.slice(2).join('\n')}`}
+                                                    >
+                                                        +{sucursalesLimpias.length - 2} más
+                                                    </span>
+                                                )}
+                                            </div>
+                                        ) : (
+                                            <span className="text-gray-400 italic text-xs font-medium">Sin asignar</span>
+                                        )}
                                     </td>
+
                                     <td className="px-6 py-4 text-center whitespace-nowrap">
                                         <span className={`px-2 py-1 inline-flex text-[10px] uppercase font-bold rounded-full border ${estadoActual === 1 ? 'bg-green-100 text-green-700 border-green-200' : 'bg-red-100 text-red-700 border-red-200'}`}>
                                             {estadoActual === 1 ? 'Activo' : 'Inactivo'}

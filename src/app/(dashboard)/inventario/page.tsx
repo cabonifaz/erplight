@@ -3,7 +3,6 @@ import { auth } from "@/auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Package, AlertTriangle, AlertCircle } from "lucide-react"; 
 import { getBranches } from "@/actions/purchase-actions"; 
-// IMPORTAMOS LA FUNCIÓN DEL CEREBRO QUE CREASTE HOY:
 import { getInventoryStocks } from "@/actions/inventory-actions"; 
 import { InventoryTable } from "./inventory-table";
 import { InventoryActionsButton } from "@/components/modules/inventario/inventory-actions-button";
@@ -40,16 +39,34 @@ export default async function InventoryPage(props: {
     const [productsList]: any = await pool.query("SELECT id, name, code FROM products WHERE status = 1 ORDER BY name ASC");
     const branches = await getBranches();
 
-    // 2. CAPTURAMOS LOS FILTROS DE LA URL (Lo que manda tu botón Aplicar)
-    const branch_id = searchParams.branchId && searchParams.branchId !== "ALL" ? Number(searchParams.branchId) : null;
+    // ✨ AQUÍ ESTÁ LA MAGIA Y LA SEGURIDAD
+    // Definimos quiénes son los VIP que pueden ver todo
+    const PRIVILEGED_ROLES = ['GERENTE GENERAL', 'GERENTE DE LOGISTICA', 'ADMINISTRADOR GENERAL'];
+    const isRestricted = !PRIVILEGED_ROLES.includes(userRole);
+
+    let finalBranchId = null;
+
+    if (isRestricted) {
+        // 🔒 REGLA DE ORO: Si es administrador de sucursal, FORZAMOS su ID.
+        // Así, aunque sea la primera carga y la URL esté vacía, buscará SU inventario.
+        // (Además evita que intenten hackear cambiando la URL manualmente).
+        finalBranchId = userBranchId;
+    } else {
+        // 🌍 Si es VIP (Gerente), leemos la URL. Si no hay nada, asume null (todas).
+        finalBranchId = searchParams.branchId && searchParams.branchId !== "ALL" 
+            ? Number(searchParams.branchId) 
+            : null;
+    }
+
+    // 2. CAPTURAMOS LOS DEMÁS FILTROS DE LA URL
     const search = searchParams.query || null;
     const min_stock = searchParams.minStock ? Number(searchParams.minStock) : null;
     const max_stock = searchParams.maxStock ? Number(searchParams.maxStock) : null;
     const updated_from = searchParams.dateFrom || null;
 
-    // 3. LLAMAMOS AL "CEREBRO" CON TODOS LOS FILTROS
+    // 3. LLAMAMOS AL "CEREBRO" CON LA SUCURSAL SEGURA
     const stocks = await getInventoryStocks({
-        branch_id,
+        branch_id: finalBranchId, // <-- Pasamos nuestra variable protegida
         search,
         min_stock,
         max_stock,
@@ -57,9 +74,7 @@ export default async function InventoryPage(props: {
     });
 
     // Cálculos de KPI rápidos para el Header
-    // (Ajustamos para leer el stock de forma segura)
     const criticalCount = stocks.filter((s: any) => s.stock_current <= (s.min_stock || 0)).length;
-    // Omitimos expiringCount por ahora si no viene del SP, o lo dejamos en 0.
     const expiringCount = 0; 
 
     return (
@@ -112,7 +127,6 @@ export default async function InventoryPage(props: {
                     <CardTitle className="text-base font-medium text-gray-700">Tablero de Existencias</CardTitle>
                 </CardHeader>
                 <CardContent className="p-0">
-                    {/* Pasamos los datos filtrados a la tabla */}
                     <InventoryTable stocks={stocks} />
                 </CardContent>
             </Card>

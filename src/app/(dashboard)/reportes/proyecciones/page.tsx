@@ -1,12 +1,19 @@
 'use client'
 
 import { useState, useEffect } from "react";
+import { useSession } from "next-auth/react";
 import { generarProyeccion, obtenerHistorialProyecciones, obtenerDetalleProyeccion } from "@/actions/projection-actions";
-import { getBranches } from "@/actions/admin-actions"; 
+import { obtenerSucursales } from "@/actions/rrhh-actions"; 
 import { TrendingUp, History, Search, ChevronRight, Calculator, Filter, Clock, ShoppingCart, Utensils, AlertCircle } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
 
 export default function ProyeccionesPage() {
+    const { data: session, status } = useSession();
+    const userRole = (session?.user as any)?.role?.toUpperCase() || "";
+    
+    const PRIVILEGED_ROLES = ["GERENTE GENERAL", "ADMINISTRADOR GENERAL", "CEO"];
+    const isPrivileged = PRIVILEGED_ROLES.includes(userRole);
+
     const [sucursales, setSucursales] = useState<any[]>([]);
     const [cargandoSedes, setCargandoSedes] = useState(true);
     const [branchId, setBranchId] = useState(""); 
@@ -27,12 +34,19 @@ export default function ProyeccionesPage() {
     const formatFechaHora = (fecha: string) => new Date(fecha).toLocaleString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
     useEffect(() => {
+        if (status === "loading") return;
+
         async function fetchSucursales() {
             try {
-                const result = await getBranches(); 
-                if (Array.isArray(result) && result.length > 0) {
-                    setSucursales(result);
-                    setBranchId(result[0].id.toString());
+                const res = await obtenerSucursales(); 
+                if (res.success && res.data.length > 0) {
+                    setSucursales(res.data);
+                    
+                    if (!isPrivileged && res.defaultBranchId) {
+                        setBranchId(String(res.defaultBranchId));
+                    } else {
+                        setBranchId(String(res.data[0].id));
+                    }
                 }
             } catch (error) {
                 console.error("Error cargando sucursales", error);
@@ -41,7 +55,7 @@ export default function ProyeccionesPage() {
             }
         }
         fetchSucursales();
-    }, []);
+    }, [status, isPrivileged]);
 
     useEffect(() => {
         if (branchId) cargarHistorial();
@@ -56,10 +70,10 @@ export default function ProyeccionesPage() {
         setLoading(true);
         const res = await generarProyeccion(Number(branchId), targetDate);
         if (res.success) {
-            alert("✅ Proyección generada con éxito basándose en el historial de las últimas 4 semanas.");
+            alert("Proyeccion generada con exito basandose en el historial de las ultimas 4 semanas.");
             await cargarHistorial(); 
         } else {
-            alert("❌ Error al generar: " + res.message);
+            alert("Error al generar: " + res.message);
         }
         setLoading(false);
     };
@@ -86,20 +100,23 @@ export default function ProyeccionesPage() {
                 <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
                     <TrendingUp className="text-purple-600" /> Inteligencia Predictiva de Ventas
                 </h1>
-                <p className="text-gray-500 mt-1">Calcula ventas, picos de hora y necesidades logísticas cruzando el comportamiento real de las últimas 4 semanas con tus recetas.</p>
+                <p className="text-gray-500 mt-1">Calcula ventas, picos de hora y necesidades logisticas cruzando el comportamiento real de las ultimas 4 semanas con tus recetas.</p>
             </div>
 
-            {/* CONTROLES DE GENERACIÓN */}
             <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col md:flex-row gap-5 items-end">
                 <div className="flex-1 w-full">
                     <label className="block text-sm font-semibold text-gray-700 mb-1.5">Sucursal a Analizar</label>
                     <select 
                         value={branchId} 
                         onChange={(e) => setBranchId(e.target.value)} 
-                        className="w-full border border-gray-200 rounded-lg p-2.5 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all outline-none"
-                        disabled={cargandoSedes}
+                        className={`w-full border border-gray-200 rounded-lg p-2.5 transition-all outline-none ${sucursales.length === 1 ? 'bg-gray-100 cursor-not-allowed font-bold text-gray-700' : 'bg-gray-50 focus:bg-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 cursor-pointer'}`}
+                        disabled={cargandoSedes || sucursales.length === 1}
                     >
-                        {cargandoSedes ? <option>Cargando...</option> : sucursales.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                        {cargandoSedes ? (
+                            <option>Cargando...</option>
+                        ) : (
+                            sucursales.map(s => <option key={s.id} value={s.id}>{s.name}</option>)
+                        )}
                     </select>
                 </div>
                 <div className="flex-1 w-full">
@@ -118,21 +135,20 @@ export default function ProyeccionesPage() {
                     className="bg-purple-600 text-white px-8 py-2.5 rounded-lg hover:bg-purple-700 font-semibold disabled:opacity-70 flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all w-full md:w-auto"
                 >
                     {loading ? (
-                        <>
+                        <div className="flex items-center gap-2">
                             <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
                             Calculando Algoritmo...
-                        </>
+                        </div>
                     ) : (
-                        <>
-                            <Calculator className="w-4 h-4" /> Ejecutar Predicción
-                        </>
+                        <div className="flex items-center gap-2">
+                            <Calculator className="w-4 h-4" /> Ejecutar Prediccion
+                        </div>
                     )}
                 </button>
             </div>
 
             <div className="grid grid-cols-1 xl:grid-cols-4 gap-6 items-start">
                 
-                {/* LISTA DE HISTORIAL (PANEL IZQUIERDO - AHORA ES STICKY Y ELEGANTE) */}
                 <div className="xl:col-span-1 bg-white border border-gray-100 rounded-xl shadow-sm flex flex-col h-[600px] xl:h-[calc(100vh-140px)] sticky top-6 overflow-hidden">
                     <div className="p-5 bg-white border-b border-gray-100 flex flex-col gap-4 z-10 shadow-sm">
                         <div className="flex items-center gap-2">
@@ -151,8 +167,7 @@ export default function ProyeccionesPage() {
                         </div>
                     </div>
                     
-                    {/* SCROLLBAR ESTILIZADO CON TAILWIND */}
-                    <div className="overflow-y-auto flex-1 divide-y divide-gray-50 bg-gray-50/30 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-200 hover:[&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full">
+                    <div className="overflow-y-auto flex-1 divide-y divide-gray-50 bg-gray-50/30">
                         {historialFiltrado.length > 0 ? historialFiltrado.map((h, idx) => {
                             const isZero = Number(h.total_estimado) === 0;
                             const isSelected = proyeccionSeleccionada?.id === h.id;
@@ -172,7 +187,7 @@ export default function ProyeccionesPage() {
                                         </span>
                                         <ChevronRight className={`w-4 h-4 ${isSelected ? 'text-purple-600' : 'text-gray-300'}`} />
                                     </div>
-                                    <p className="text-[11px] text-gray-400 mb-1 font-medium tracking-wide">CÁLCULO: {formatFechaHora(h.created_at)}</p>
+                                    <p className="text-[11px] text-gray-400 mb-1 font-medium tracking-wide">CALCULO: {formatFechaHora(h.created_at)}</p>
                                     <p className={`text-sm font-black ${isZero ? 'text-gray-500' : 'text-purple-700'}`}>
                                         {isZero ? 'Sin datos suficientes' : `Total: S/ ${formatMoneda(h.total_estimado)}`}
                                     </p>
@@ -187,18 +202,16 @@ export default function ProyeccionesPage() {
                     </div>
                 </div>
 
-                {/* DETALLES COMPLETOS (PANEL DERECHO - AHORA CRECE NATURALMENTE SIN SCROLLBAR PROPIO) */}
                 <div className="xl:col-span-3 flex flex-col gap-6">
                     {proyeccionSeleccionada ? (
-                        <>
-                            {/* HEADER DE IMPACTO */}
+                        <div className="flex flex-col gap-6">
                             <div className="p-6 bg-white border border-gray-100 rounded-xl shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center shrink-0 relative overflow-hidden">
                                 <div className="absolute top-0 left-0 w-1.5 h-full bg-purple-600"></div>
                                 <div className="z-10 pl-2">
-                                    <h2 className="font-black text-gray-900 text-2xl mb-1">Predicción: {new Date(proyeccionSeleccionada.target_date).toISOString().split('T')[0]}</h2>
+                                    <h2 className="font-black text-gray-900 text-2xl mb-1">Prediccion: {new Date(proyeccionSeleccionada.target_date).toISOString().split('T')[0]}</h2>
                                     <p className="text-sm text-gray-500 font-medium flex items-center gap-1.5">
                                         <AlertCircle className="w-4 h-4 text-purple-500" />
-                                        Análisis basado en {datosHora.length} franjas horarias comerciales.
+                                        Analisis basado en {datosHora.length} franjas horarias comerciales.
                                     </p>
                                 </div>
                                 <div className="mt-4 sm:mt-0 bg-purple-600 p-4 rounded-xl shadow-lg border border-purple-500 text-right min-w-[200px]">
@@ -207,10 +220,8 @@ export default function ProyeccionesPage() {
                                 </div>
                             </div>
 
-                            {/* GRID DE TABLAS (AHORA CRECEN SOLAS, SIN SCROLL) */}
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                                 
-                                {/* TABLA PLATILLOS */}
                                 <div className="bg-white border border-gray-100 rounded-xl shadow-sm flex flex-col overflow-hidden h-full">
                                     <div className="p-4 border-b border-gray-100 bg-gray-50/80">
                                         <h3 className="font-bold text-gray-800 flex items-center gap-2">
@@ -242,12 +253,11 @@ export default function ProyeccionesPage() {
                                     </div>
                                 </div>
 
-                                {/* TABLA LOGÍSTICA */}
                                 <div className="bg-white border border-gray-100 rounded-xl shadow-sm flex flex-col overflow-hidden h-full">
                                     <div className="p-4 border-b border-gray-100 bg-gray-50/80">
                                         <h3 className="font-bold text-gray-800 flex items-center gap-2">
                                             <div className="p-1.5 bg-green-100 rounded-lg"><ShoppingCart className="w-4 h-4 text-green-600" /></div>
-                                            Consumo Logístico Proyectado
+                                            Consumo Logistico Proyectado
                                         </h3>
                                     </div>
                                     <div className="w-full overflow-x-auto">
@@ -273,7 +283,6 @@ export default function ProyeccionesPage() {
                                     </div>
                                 </div>
 
-                                {/* GRÁFICA DE HORAS CON GRADIENTE */}
                                 <div className="lg:col-span-2 bg-white border border-gray-100 rounded-xl shadow-sm p-6 h-[360px]">
                                     <div className="flex justify-between items-center mb-6">
                                         <h3 className="font-bold text-gray-800 flex items-center gap-2">
@@ -305,14 +314,14 @@ export default function ProyeccionesPage() {
                                     </div>
                                 </div>
                             </div>
-                        </>
+                        </div>
                     ) : (
                         <div className="flex-1 flex flex-col items-center justify-center text-gray-400 p-12 text-center bg-white border border-gray-100 border-dashed rounded-2xl shadow-sm min-h-[400px]">
                             <div className="p-4 bg-gray-50 rounded-full mb-4">
                                 <Search className="w-12 h-12 text-gray-300" />
                             </div>
                             <p className="text-xl font-bold text-gray-800 mb-2">Selecciona un Historial</p>
-                            <p className="text-sm text-gray-500 max-w-md">Navega por el panel izquierdo y haz clic en un cálculo para ver la radiografía predictiva: platillos sugeridos, picos horarios y compras necesarias de inventario.</p>
+                            <p className="text-sm text-gray-500 max-w-md">Navega por el panel izquierdo y haz clic en un calculo para ver la radiografia predictiva: platillos sugeridos, picos horarios y compras necesarias de inventario.</p>
                         </div>
                     )}
                 </div>

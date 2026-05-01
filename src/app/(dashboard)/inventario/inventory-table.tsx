@@ -44,78 +44,112 @@ export function InventoryTable({ stocks }: { stocks: any[] }) {
                     </TableRow>
                 </TableHeader>
                 <TableBody>
-                    {stocks.map((item) => (
-                        <TableRow key={item.id} className="hover:bg-slate-50 transition-colors group">
-                            
-                            <TableCell className="font-medium text-gray-600">
-                                <div className="flex items-center gap-2">
-                                    <MapPin className="w-4 h-4 text-gray-400" />
-                                    {item.branch_name}
-                                </div>
-                            </TableCell>
-                            
-                            <TableCell className="font-mono text-xs text-gray-500">
-                                {item.product_code || '-'}
-                            </TableCell>
-                            
-                            <TableCell className="font-bold text-gray-800">
-                                {item.product_name}
-                            </TableCell>
-                            
-                            <TableCell className="text-right">
-                                <div className="flex justify-end">
-                                    <Badge 
-                                        variant="outline" 
-                                        className={cn(
-                                            "font-mono text-sm px-3 py-1 flex items-center gap-1.5 transition-colors cursor-help",
-                                            getStockBadgeStyles(item.stock_status)
-                                        )}
-                                        title={
-                                            item.stock_status === 'CRITICAL' ? `Stock Crítico (Mín: ${item.min_stock})` :
-                                            item.stock_status === 'WARNING' ? `Punto de Reorden (Reorden: ${item.reorder_point})` :
-                                            'Stock Saludable'
-                                        }
-                                    >
-                                        {item.stock_status === 'CRITICAL' && <AlertCircle className="w-3.5 h-3.5" />}
-                                        {item.stock_status === 'WARNING' && <AlertTriangle className="w-3.5 h-3.5" />}
-                                        {item.stock_status === 'OK' && <CheckCircle2 className="w-3.5 h-3.5 opacity-50" />}
-                                        
-                                        {Number(item.stock_current).toFixed(2)} {item.unit_measure}
-                                    </Badge>
-                                </div>
-                            </TableCell>
+                    {stocks.map((item) => {
+                        // ✨ LÓGICA NUEVA: Calculamos el estado real del stock matemáticamente
+                        const currentStock = Number(item.stock_current || 0);
+                        const minStock = Number(item.min_stock || 0);
+                        const reorderPoint = Number(item.reorder_point || 0);
+                        
+                        let realStatus = item.stock_status || 'OK';
+                        
+                        if (currentStock <= 0) {
+                            realStatus = 'CRITICAL';
+                        } else if (minStock > 0 && currentStock <= minStock) {
+                            realStatus = 'CRITICAL';
+                        } else if (reorderPoint > 0 && currentStock <= reorderPoint) {
+                            realStatus = 'WARNING';
+                        }
 
-                            <TableCell>
-                                {Number(item.expiring_soon_qty) > 0 ? (
-                                    <div className="flex items-center gap-1.5 text-orange-700 bg-orange-50 border border-orange-100 px-2 py-1 rounded-md w-fit">
-                                        <CalendarClock className="w-3.5 h-3.5" />
-                                        <div className="flex flex-col leading-none">
-                                            <span className="text-xs font-bold">{item.expiring_soon_qty} unid.</span>
-                                            <span className="text-[10px] opacity-80">vencen pronto</span>
-                                        </div>
+                        return (
+                            <TableRow key={item.id} className="hover:bg-slate-50 transition-colors group">
+                                
+                                <TableCell className="font-medium text-gray-600">
+                                    <div className="flex items-center gap-2">
+                                        <MapPin className="w-4 h-4 text-gray-400" />
+                                        {item.branch_name}
                                     </div>
-                                ) : (
-                                    <span className="text-gray-300 text-xs">-</span>
-                                )}
-                            </TableCell>
+                                </TableCell>
+                                
+                                <TableCell className="font-mono text-xs text-gray-500">
+                                    {item.product_code || '-'}
+                                </TableCell>
+                                
+                                <TableCell className="font-bold text-gray-800">
+                                    {item.product_name}
+                                </TableCell>
+                                
+                                <TableCell className="text-right">
+                                    <div className="flex justify-end">
+                                        <Badge 
+                                            variant="outline" 
+                                            className={cn(
+                                                "font-mono text-sm px-3 py-1 flex items-center gap-1.5 transition-colors cursor-help",
+                                                getStockBadgeStyles(realStatus)
+                                            )}
+                                            title={
+                                                realStatus === 'CRITICAL' ? `Stock Crítico (Mín: ${minStock})` :
+                                                realStatus === 'WARNING' ? `Punto de Reorden (Reorden: ${reorderPoint})` :
+                                                'Stock Saludable'
+                                            }
+                                        >
+                                            {realStatus === 'CRITICAL' && <AlertCircle className="w-3.5 h-3.5" />}
+                                            {realStatus === 'WARNING' && <AlertTriangle className="w-3.5 h-3.5" />}
+                                            {realStatus === 'OK' && <CheckCircle2 className="w-3.5 h-3.5 opacity-50" />}
+                                            
+                                            {currentStock.toFixed(2)} {item.unit_measure}
+                                        </Badge>
+                                    </div>
+                                </TableCell>
 
-                            <TableCell className="text-xs text-gray-400 text-right">
-                                {item.last_update ? new Date(item.last_update).toLocaleDateString() : '-'}
-                            </TableCell>
-                            
-                            <TableCell>
-                                <Button 
-                                    variant="ghost" 
-                                    size="icon" 
-                                    className="opacity-0 group-hover:opacity-100 transition-opacity text-blue-600 hover:text-blue-800 hover:bg-blue-50"
-                                    onClick={() => setSelectedItem(item)}
-                                    title="Ver Historial de Movimientos"
-                                >
-                                    <Eye className="w-4 h-4" />
-                                </Button>
-                            </TableCell>
-                        </TableRow>
-                    ))}
+                                {/* ✨ LÓGICA NUEVA: Columna de alertas mejorada */}
+                                <TableCell>
+                                    <div className="flex flex-col gap-1.5">
+                                        {/* Alerta de Agotado/Crítico en rojo */}
+                                        {realStatus === 'CRITICAL' && (
+                                            <div className="flex items-center gap-1.5 text-red-700 bg-red-50 border border-red-100 px-2 py-1 rounded-md w-fit shadow-sm">
+                                                <AlertCircle className="w-3.5 h-3.5" />
+                                                <span className="text-[11px] font-bold uppercase tracking-tight">
+                                                    {currentStock <= 0 ? 'Agotado' : 'Stock Crítico'}
+                                                </span>
+                                            </div>
+                                        )}
+
+                                        {/* Alerta de Vencimiento existente */}
+                                        {Number(item.expiring_soon_qty) > 0 && (
+                                            <div className="flex items-center gap-1.5 text-orange-700 bg-orange-50 border border-orange-100 px-2 py-1 rounded-md w-fit shadow-sm">
+                                                <CalendarClock className="w-3.5 h-3.5" />
+                                                <div className="flex flex-col leading-none">
+                                                    <span className="text-xs font-bold">{item.expiring_soon_qty} unid.</span>
+                                                    <span className="text-[10px] opacity-80">vencen pronto</span>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Guion si no hay alertas */}
+                                        {realStatus !== 'CRITICAL' && Number(item.expiring_soon_qty) <= 0 && (
+                                            <span className="text-gray-300 text-xs">-</span>
+                                        )}
+                                    </div>
+                                </TableCell>
+
+                                <TableCell className="text-xs text-gray-400 text-right">
+                                    {item.last_update ? new Date(item.last_update).toLocaleDateString() : '-'}
+                                </TableCell>
+                                
+                                <TableCell>
+                                    <Button 
+                                        variant="ghost" 
+                                        size="icon" 
+                                        className="opacity-0 group-hover:opacity-100 transition-opacity text-blue-600 hover:text-blue-800 hover:bg-blue-50"
+                                        onClick={() => setSelectedItem(item)}
+                                        title="Ver Historial de Movimientos"
+                                    >
+                                        <Eye className="w-4 h-4" />
+                                    </Button>
+                                </TableCell>
+                            </TableRow>
+                        );
+                    })}
 
                     {stocks.length === 0 && (
                         <TableRow>

@@ -1,11 +1,15 @@
 'use client'
 
 import { useState } from "react";
+import { useSession } from "next-auth/react";
 import { obtenerDashboardCorporativo } from "@/actions/dashboard-actions";
 import { Building2, Clock, DollarSign, Receipt, Utensils, PieChart } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
 
 export default function DashboardCorporativoPage() {
+    const { data: session, status } = useSession();
+    const userRole = (session?.user as any)?.role?.toUpperCase() || "";
+
     const [fechaInicio, setFechaInicio] = useState("");
     const [fechaFin, setFechaFin] = useState("");
     const [loading, setLoading] = useState(false);
@@ -15,6 +19,21 @@ export default function DashboardCorporativoPage() {
     const [rankingSedes, setRankingSedes] = useState<any[]>([]);
     const [horarios, setHorarios] = useState<any[]>([]);
     const [topProductos, setTopProductos] = useState<any[]>([]);
+
+    if (status === 'loading') {
+        return <div className="min-h-[60vh] flex justify-center items-center font-bold text-gray-500">Verificando accesos...</div>;
+    }
+
+    const PRIVILEGED_ROLES = ["GERENTE GENERAL", "ADMINISTRADOR GENERAL", "CEO"];
+    if (!PRIVILEGED_ROLES.includes(userRole)) {
+        return (
+            <div className="flex flex-col items-center justify-center min-h-[60vh]">
+                <span className="text-6xl mb-4">⛔</span>
+                <h1 className="text-2xl font-bold text-gray-800">Acceso Restringido</h1>
+                <p className="mt-2 text-gray-500">Tu rol actual no tiene permisos para ver metricas corporativas globales.</p>
+            </div>
+        );
+    }
 
     const handleGenerar = async () => {
         if (!fechaInicio || !fechaFin) return alert("Por favor selecciona un rango de fechas.");
@@ -39,19 +58,16 @@ export default function DashboardCorporativoPage() {
         setLoading(false);
     };
 
-    // ✨ 1. Función para dar formato a la moneda (con separador de miles)
-   const formatMoneda = (valor: any) => {
+    const formatMoneda = (valor: any) => {
         return new Intl.NumberFormat('es-PE', { style: 'currency', currency: 'PEN' }).format(Number(valor));
     };
 
-    // ✨ 2. Función para convertir horas militares (14) a formato AM/PM (02:00 PM)
-   const formatHora = (hora: any) => {
+    const formatHora = (hora: any) => {
         const h = Number(hora);
         if (h === 12) return '12:00 PM';
         return h > 12 ? `${h - 12}:00 PM` : `${h}:00 AM`;
     };
 
-    // ✨ 3. Filtramos las sedes para quitar las que están en CERO
     const sedesActivas = rankingSedes.filter(sede => Number(sede.total_vendido) > 0);
 
     return (
@@ -61,14 +77,13 @@ export default function DashboardCorporativoPage() {
                     <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
                         <PieChart className="text-blue-700" /> Dashboard Corporativo
                     </h1>
-                    <p className="text-gray-600">Rendimiento global, comparación de sedes y análisis de ventas.</p>
+                    <p className="text-gray-600">Rendimiento global, comparacion de sedes y analisis de ventas.</p>
                 </div>
                 <div className="bg-white text-blue-800 px-4 py-2 rounded-md font-semibold text-sm border border-blue-200 shadow-sm">
                     Vista General Consolidada
                 </div>
             </div>
 
-            {/* CONTROLES */}
             <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 flex flex-col md:flex-row gap-4 items-end">
                 <div className="flex-1">
                     <label className="block text-sm font-semibold text-gray-700 mb-1">Fecha de Inicio</label>
@@ -79,19 +94,18 @@ export default function DashboardCorporativoPage() {
                     <input type="date" value={fechaFin} onChange={(e) => setFechaFin(e.target.value)} className="w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 outline-none" />
                 </div>
                 <button onClick={handleGenerar} disabled={loading || !fechaInicio || !fechaFin} className="bg-blue-600 text-white px-8 py-2.5 rounded-lg hover:bg-blue-700 font-bold disabled:opacity-50 transition-all shadow-md">
-                    {loading ? "Analizando Cadena..." : "Generar Análisis"}
+                    {loading ? "Analizando Cadena..." : "Generar Analisis"}
                 </button>
             </div>
 
             {hasSearched && (
                 <div className="space-y-6 animate-in fade-in duration-500">
                     
-                    {/* KPIs SUPERIORES */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div className="bg-white border border-gray-100 rounded-xl p-6 shadow-sm flex items-center gap-5 hover:shadow-md transition-shadow">
                             <div className="p-4 bg-green-50 text-green-600 rounded-full ring-1 ring-green-100"><DollarSign className="w-8 h-8" /></div>
                             <div>
-                                <p className="text-sm font-bold text-gray-400 uppercase tracking-wider">Facturación Total Cadena</p>
+                                <p className="text-sm font-bold text-gray-400 uppercase tracking-wider">Facturacion Total Cadena</p>
                                 <p className="text-4xl font-extrabold text-gray-800">{formatMoneda(kpis.total_ingresos)}</p>
                             </div>
                         </div>
@@ -104,10 +118,8 @@ export default function DashboardCorporativoPage() {
                         </div>
                     </div>
 
-                    {/* GRÁFICAS DE RENDIMIENTO */}
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                         
-                        {/* 1. RANKING DE SEDES (Filtrado) */}
                         <div className="bg-white border border-gray-100 rounded-xl p-6 shadow-sm">
                             <h2 className="text-lg font-bold text-gray-800 mb-6 flex items-center gap-2">
                                 <Building2 className="text-indigo-500 w-5 h-5" /> Ranking de Ventas por Sede
@@ -125,7 +137,6 @@ export default function DashboardCorporativoPage() {
                             </div>
                         </div>
 
-                        {/* 2. PICOS DE HORARIO GLOBAL (Formateado) */}
                         <div className="bg-white border border-gray-100 rounded-xl p-6 shadow-sm">
                             <h2 className="text-lg font-bold text-gray-800 mb-6 flex items-center gap-2">
                                 <Clock className="text-orange-500 w-5 h-5" /> Demanda por Horario
@@ -136,7 +147,7 @@ export default function DashboardCorporativoPage() {
                                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
                                         <XAxis dataKey="hora" tickFormatter={formatHora} tick={{fontSize: 11, fill: '#6b7280'}} />
                                         <YAxis tickFormatter={(val) => `S/${val/1000}k`} tick={{fontSize: 12, fill: '#9ca3af'}}/>
-                                        <RechartsTooltip cursor={{fill: '#f3f4f6'}} labelFormatter={formatHora} formatter={(value: any) => [formatMoneda(value), 'Facturación']} />
+                                        <RechartsTooltip cursor={{fill: '#f3f4f6'}} labelFormatter={formatHora} formatter={(value: any) => [formatMoneda(value), 'Facturacion']} />
                                         <Bar dataKey="ingresos" fill="#f97316" radius={[4, 4, 0, 0]} />
                                     </BarChart>
                                 </ResponsiveContainer>
@@ -145,10 +156,9 @@ export default function DashboardCorporativoPage() {
 
                     </div>
 
-                    {/* 3. TOP PRODUCTOS GLOBAL (Mejorado) */}
                     <div className="bg-white border border-gray-100 rounded-xl p-6 shadow-sm">
                         <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
-                            <Utensils className="text-green-500 w-5 h-5" /> Top Productos Más Rentables
+                            <Utensils className="text-green-500 w-5 h-5" /> Top Productos Mas Rentables
                         </h2>
                         <div className="overflow-x-auto rounded-lg border border-gray-100">
                             <table className="min-w-full text-left text-sm">
@@ -157,12 +167,11 @@ export default function DashboardCorporativoPage() {
                                         <th className="p-4 font-bold text-gray-600">Producto</th>
                                         <th className="p-4 font-bold text-gray-600 text-center">Precio Prom.</th>
                                         <th className="p-4 font-bold text-gray-600 text-center">Unidades</th>
-                                        <th className="p-4 font-bold text-blue-700 text-right">Facturación Generada</th>
+                                        <th className="p-4 font-bold text-blue-700 text-right">Facturacion Generada</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-50">
                                     {topProductos.map((art, idx) => {
-                                        // Calculamos el precio promedio para que tenga sentido el orden
                                         const precioUnitario = Number(art.total_generado) / Number(art.cantidad);
                                         
                                         return (

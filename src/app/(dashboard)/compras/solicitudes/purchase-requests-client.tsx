@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 // ✨ Nuevos íconos corporativos agregados aquí
 import { ShoppingCart, Calendar, MapPin, User, FileText, MessageSquare, TrendingUp, BarChart3, Building2, AlertCircle, CheckCircle2, RefreshCw } from "lucide-react";
 
+
 const money = (amount: number, currency: string = 'PEN') => {
     return new Intl.NumberFormat('es-PE', { style: 'currency', currency: currency }).format(amount);
 };
