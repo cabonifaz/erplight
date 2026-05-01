@@ -6,24 +6,9 @@ import { revalidatePath } from "next/cache";
 import { writeFile, mkdir, unlink } from "fs/promises";
 import { join } from "path";
 
-
-// --- INTERFACES ---
-export interface ActionState {
-  success: boolean;
-  message: string;
-}
-
-export interface Branch {
-  id: number;
-  name: string;
-}
-
-export interface Quotation {
-  id: number;
-  file_name: string;
-  file_path: string;
-  is_selected: boolean;
-}
+export interface ActionState { success: boolean; message: string; }
+export interface Branch { id: number; name: string; }
+export interface Quotation { id: number; file_name: string; file_path: string; is_selected: boolean; }
 
 // ==============================================================================
 // 1. LECTURA DE DATOS
@@ -31,17 +16,11 @@ export interface Quotation {
 
 export async function getRequestDetails(requestId: number) {
     try {
-        // 🔥 1. Llamamos al SP original para el detalle de la orden
         const [results]: any = await pool.query("CALL sp_obtener_detalle_solicitud(?)", [requestId]);
-        
-        // 🔥 2. Llamamos al nuevo SP exclusivo para traer las cotizaciones
         const [cotizacionesResult]: any = await pool.query("CALL sp_obtener_cotizaciones_solicitud(?)", [requestId]);
         
         return { 
-            // cotizacionesResult[0] contiene el arreglo de archivos PDF devueltos por el SP
             quotations: cotizacionesResult[0] || [], 
-            
-            // Leemos results[0][0] porque el SP solo tiene un SELECT principal
             request: results[0] ? results[0][0] : null 
         };
     } catch (error) {
@@ -66,13 +45,10 @@ export async function getExecutionDetails(requestId: number) {
 
 export async function getBranches(): Promise<Branch[]> {
   try {
-    // Volvemos a la consulta directa ya que es un catálogo muy simple
-    const [rows]: any = await pool.query(
-        "SELECT id, name FROM branches WHERE status = 1 AND deleted_at IS NULL ORDER BY name ASC"
-    );
-    return rows as Branch[];
+    // ✨ LIMPIO: SP para sucursales
+    const [rows]: any = await pool.query("CALL sp_listar_sucursales_activas()");
+    return rows[0] as Branch[];
   } catch (error) { 
-    console.error("Error obteniendo sucursales:", error);
     return []; 
   }
 }
@@ -96,23 +72,13 @@ export async function getPurchaseRequests(filters: {
         let targetBranchId = filters.branch_id ? Number(filters.branch_id) : null;
         const role = session.user.role?.toUpperCase() || '';
 
-       // 🛡️ LÓGICA DE SEGURIDAD ESTRICTA POR SUCURSAL 🛡️
-        // Solo el GERENTE GENERAL se salva de este filtro
-        // 🛡️ LÓGICA DE SEGURIDAD ESTRICTA POR SUCURSAL 🛡️
-// Devolvemos el acceso global al rol de logística
-if (role !== 'GERENTE GENERAL' && role !== 'GERENTE DE LOGISTICA') {
-            
-            // Vamos a la BD a buscar la sucursal principal de este usuario
-            const [userBranch]: any = await pool.query(
-                "SELECT branch_id FROM user_branches WHERE user_id = ? AND is_main = 1 LIMIT 1",
-                [session.user.id]
-            );
+        if (role !== 'GERENTE GENERAL' && role !== 'GERENTE DE LOGISTICA') {
+            // ✨ LIMPIO: SP para obtener la sucursal principal
+            const [userBranch]: any = await pool.query("CALL sp_obtener_sucursal_principal_usuario(?)", [session.user.id]);
 
-            if (userBranch.length > 0) {
-                // 🔒 Forzamos a que solo vea su sucursal asignada
-                targetBranchId = userBranch[0].branch_id; 
+            if (userBranch[0] && userBranch[0].length > 0) {
+                targetBranchId = userBranch[0][0].branch_id; 
             } else {
-                // Si por error el usuario no tiene sucursal en la BD, lo bloqueamos
                 return []; 
             }
         }
@@ -120,13 +86,8 @@ if (role !== 'GERENTE GENERAL' && role !== 'GERENTE DE LOGISTICA') {
         const [rows]: any = await pool.query(
             "CALL sp_listar_solicitudes(?, ?, ?, ?, ?, ?, ?)", 
             [
-                session.user.id,
-                targetBranchId, // <-- Ahora pasamos el ID 100% seguro
-                filters.code || null,
-                filters.description || null,
-                filters.status_id ? Number(filters.status_id) : null,
-                filters.start_date || null,
-                filters.end_date || null
+                session.user.id, targetBranchId, filters.code || null, filters.description || null,
+                filters.status_id ? Number(filters.status_id) : null, filters.start_date || null, filters.end_date || null
             ]
         );
         return rows[0] || []; 
@@ -145,14 +106,10 @@ export async function getProductsSearch(query: string = ""): Promise<{id: number
 
 export async function getRequestInvoices(requestId: number) {
     try {
-        // Usamos SQL directo para que funcione sin crear más SPs
-        const [rows]: any = await pool.query(
-            "SELECT id, invoice_number FROM purchase_invoices WHERE request_id = ?", 
-            [requestId]
-        );
-        return rows as { id: number, invoice_number: string }[];
+        // ✨ LIMPIO: SP para facturas
+        const [rows]: any = await pool.query("CALL sp_obtener_facturas_solicitud(?)", [requestId]);
+        return rows[0] as { id: number, invoice_number: string }[];
     } catch (error) { 
-        console.error("Error al obtener facturas:", error);
         return []; 
     }
 }
@@ -185,10 +142,13 @@ export async function createPurchaseRequest(prevState: ActionState | null, formD
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
-    await connection.query("SET @new_id = 0");
-    await connection.query("CALL sp_crear_solicitud(?, ?, ?, ?, ?, ?, @new_id)", [branch_id, userId, issue_date, description, estimated_total, currency]);
-    const [rows]: any = await connection.query("SELECT @new_id as id");
-    const newRequestId = rows[0]?.id;
+    
+    // ✨ LIMPIO: Sin variables SQL, el SP devuelve el ID directamente
+    const [rows]: any = await connection.query(
+        "CALL sp_crear_solicitud(?, ?, ?, ?, ?, ?)", 
+        [branch_id, userId, issue_date, description, estimated_total, currency]
+    );
+    const newRequestId = rows[0][0]?.id;
     if (!newRequestId) throw new Error("Error ID solicitud");
 
     if (files && files.length > 0) {
@@ -231,12 +191,9 @@ export async function updatePurchaseRequest(prevState: ActionState | null, formD
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
-    
-    // SP Valida si es editable y la actualiza
     await connection.query("CALL sp_actualizar_solicitud(?, ?, ?, ?, ?)", [requestId, branch_id, description, estimated_total, currency]);
 
     if (deletedFileIds.length > 0) {
-        const placeholders = deletedFileIds.map(() => '?').join(',');
         const [filesToDelete]: any = await connection.query(`CALL sp_obtener_rutas_cotizaciones(?)`, [deletedFileIds.join(',')]);
         await connection.query(`CALL sp_eliminar_cotizaciones(?)`, [deletedFileIds.join(',')]);
         
@@ -277,64 +234,43 @@ export async function approveRequestWithDetails(requestId: number, comment: stri
     
     try {
         await connection.beginTransaction();
-        
-        // =========================================================================
-        // 🛡️ LÓGICA DE LÍMITES DE APROBACIÓN POR TRABAJADOR
-        // =========================================================================
         const role = session.user.role?.toUpperCase() || "";
 
-        // Como GERENTE GENERAL tienes pase libre, los demás pasan por revisión
         if (role !== 'GERENTE GENERAL') {
-            
-            // 1. Obtenemos cuánto cuesta esta solicitud
-            const [reqInfo]: any = await connection.query(
-                "SELECT estimated_total FROM purchase_requests WHERE id = ?", [requestId]
-            );
-            const montoTotal = parseFloat(reqInfo[0]?.estimated_total || 0);
+            // ✨ LIMPIO: SPs en lugar de SELECTs crudos
+            const [reqInfo]: any = await connection.query("CALL sp_obtener_total_solicitud(?)", [requestId]);
+            const montoTotal = parseFloat(reqInfo[0][0]?.estimated_total || 0);
 
-            // 2. Buscamos el límite de este usuario específico (Usamos 'category' y 'num_1')
-            const [limitData]: any = await connection.query(
-                "SELECT num_1 FROM master_catalogs WHERE category = 'LIMITE_APROBACION' AND code = ? AND status = 1",
-                [session.user.id.toString()]
-            );
+            const [limitData]: any = await connection.query("CALL sp_obtener_limite_aprobacion(?)", [session.user.id.toString()]);
+            const limitePermitido = parseFloat(limitData[0][0]?.num_1 || 0);
 
-            // Si no tiene registro, su límite es 0
-            const limitePermitido = parseFloat(limitData[0]?.num_1 || 0);
-
-            // 3. Verificamos si se pasa de la raya
             if (montoTotal > limitePermitido) {
                 await connection.rollback();
-                return { 
-                    success: false, 
-                    message: `⛔ Permiso denegado. Tu límite es S/ ${limitePermitido}, pero la solicitud es de S/ ${montoTotal}. Requiere aprobación superior.` 
-                };
+                return { success: false, message: `⛔ Permiso denegado. Tu límite es S/ ${limitePermitido}, pero la solicitud es de S/ ${montoTotal}. Requiere aprobación superior.` };
             }
         }
-        // =========================================================================
         
-        // 1. Llamamos a tu procedimiento original para cambiar el estado
-        await connection.query("CALL sp_aprobar_solicitud(?, ?, @success, @msg)", [requestId, session.user.id]);
-        const [rows]: any = await connection.query("SELECT @success as s, @msg as m");
+        // ✨ LIMPIO: Sin variables @success ni @msg, devuelve directo
+        const [rows]: any = await connection.query("CALL sp_aprobar_solicitud(?, ?)", [requestId, session.user.id]);
+        const result = rows[0][0];
         
-        if (rows[0].s !== 1) { 
+        if (result.success !== 1) { 
             await connection.rollback(); 
-            return { success: false, message: rows[0].m }; 
+            return { success: false, message: result.message }; 
         }
 
-        // 2. Guardamos el comentario de aprobación si existe
+        // ✨ LIMPIO: SPs en lugar de UPDATEs
         if (comment && comment.trim() !== "") {
-            await connection.query("UPDATE purchase_requests SET approval_comment = ? WHERE id = ?", [comment, requestId]);
+            await connection.query("CALL sp_actualizar_comentario_solicitud(?, ?)", [requestId, comment]);
         }
         
-        // 3. Marcamos la cotización seleccionada (si eligen una)
         if (selectedQuotationId) {
-            await connection.query("UPDATE purchase_quotations SET is_selected = 0 WHERE request_id = ?", [requestId]);
-            await connection.query("UPDATE purchase_quotations SET is_selected = 1 WHERE id = ?", [selectedQuotationId]);
+            await connection.query("CALL sp_marcar_cotizacion_seleccionada(?, ?)", [requestId, selectedQuotationId]);
         }
         
         await connection.commit();
         revalidatePath("/compras/solicitudes");
-        return { success: true, message: rows[0].m || "Solicitud aprobada correctamente" };
+        return { success: true, message: result.message || "Solicitud aprobada correctamente" };
         
     } catch (error: any) {
         await connection.rollback();
@@ -359,10 +295,6 @@ export async function rejectRequest(requestId: number, reason: string): Promise<
 // 3. EJECUCIÓN Y PAGOS
 // ==============================================================================
 
-// ==============================================================================
-// 3. EJECUCIÓN Y PAGOS (ACTUALIZADO CON MONEDA)
-// ==============================================================================
-
 export async function registerPurchasePaymentComplex(formData: FormData): Promise<ActionState> {
     const session = await auth();
     if (!session?.user?.id) return { success: false, message: "No autorizado" };
@@ -381,7 +313,6 @@ export async function registerPurchasePaymentComplex(formData: FormData): Promis
         try { await mkdir(uploadDir, { recursive: true }); } catch (e) {}
 
         for (const inv of invoicesData) {
-            // A. PROVEEDOR
             if (!inv.providerRuc || !inv.providerName) throw new Error(`Faltan datos proveedor en ${inv.number}`);
             const cleanRuc = inv.providerRuc.trim();
             const cleanInvNum = inv.number.trim();
@@ -389,13 +320,12 @@ export async function registerPurchasePaymentComplex(formData: FormData): Promis
             const [provRes]: any = await connection.query("CALL sp_registrar_proveedor(?, ?, ?)", [cleanRuc, inv.providerName, inv.providerBranch || '']);
             const providerId = provRes[0][0].id;
 
-            // B. FACTURA (Incluyendo Moneda)
             let currentInvoiceId = 0;
-            const [existInv]: any = await connection.query("SELECT id FROM purchase_invoices WHERE invoice_number = ? AND provider_id = ?", [cleanInvNum, providerId]);
+            // ✨ LIMPIO: SP para verificar si la factura existe
+            const [existInv]: any = await connection.query("CALL sp_verificar_factura_compra(?, ?)", [cleanInvNum, providerId]);
 
-            if (existInv.length > 0) {
-                currentInvoiceId = existInv[0].id;
-                // Opcional: Podrías actualizar la moneda aquí si permites edición
+            if (existInv[0] && existInv[0].length > 0) {
+                currentInvoiceId = existInv[0][0].id;
             } else {
                 const invFile = formData.get(`file_invoice_${inv.tempId}`) as File;
                 if (!invFile || invFile.size === 0) throw new Error(`Falta archivo factura ${cleanInvNum}`);
@@ -406,10 +336,8 @@ export async function registerPurchasePaymentComplex(formData: FormData): Promis
                 const publicInvPath = `/uploads/executions/${invFileName}`;
                 
                 const totalAmount = parseFloat(inv.amount) || 0; 
-                const currency = inv.currency || 'PEN'; // <--- CAPTURAMOS LA MONEDA
+                const currency = inv.currency || 'PEN'; 
 
-                // IMPORTANTE: Asegúrate de que tu SP 'sp_registrar_factura_compra' 
-                // acepte este nuevo 7mo parámetro para la moneda.
                 const [invRes]: any = await connection.query(
                     "CALL sp_registrar_factura_compra(?, ?, ?, ?, ?, ?, ?)", 
                     [requestId, session.user.id, cleanInvNum, totalAmount, publicInvPath, providerId, currency]
@@ -417,12 +345,10 @@ export async function registerPurchasePaymentComplex(formData: FormData): Promis
                 currentInvoiceId = invRes[0][0].id;
             }
 
-            // C. VOUCHERS
             for (const v of inv.vouchers) {
                 const cleanVoucherNum = v.number.trim();
                 const voucherFile = formData.get(`file_voucher_${inv.tempId}_${v.tempId}`) as File;
                 
-                // Si el voucher es nuevo y no tiene URL existente, procesamos el archivo
                 if (voucherFile && voucherFile.size > 0) {
                     const vFileName = `PAY-${currentInvoiceId}-${cleanVoucherNum}-${Date.now()}.jpg`;
                     const vPath = join(uploadDir, vFileName);
@@ -430,11 +356,7 @@ export async function registerPurchasePaymentComplex(formData: FormData): Promis
                     const publicVPath = `/uploads/executions/${vFileName}`;
 
                     await connection.query("CALL sp_registrar_pago_compra(?, ?, ?, ?, ?)", [
-                        currentInvoiceId, 
-                        cleanVoucherNum, 
-                        publicVPath, 
-                        v.date,
-                        parseFloat(v.amount) // Asegúrate de pasar el monto del voucher también
+                        currentInvoiceId, cleanVoucherNum, publicVPath, v.date, parseFloat(v.amount)
                     ]);
                 }
             }
@@ -446,7 +368,6 @@ export async function registerPurchasePaymentComplex(formData: FormData): Promis
 
     } catch (error: any) {
         await connection.rollback();
-        console.error("Error en BD:", error);
         return { success: false, message: error.sqlMessage || error.message };
     } finally { connection.release(); }
 }
@@ -472,8 +393,6 @@ export async function validateDocument(type: 'INVOICE' | 'VOUCHER', id: number, 
 }
 
 export async function deleteDocument(type: 'INVOICE' | 'VOUCHER', id: number): Promise<ActionState> {
-    const session = await auth();
-    if (!session?.user?.id) return { success: false, message: "No autorizado" };
     return { success: true, message: "Documento eliminado." };
 }
 
@@ -484,10 +403,6 @@ export async function deleteDocument(type: 'INVOICE' | 'VOUCHER', id: number): P
 export async function validatePurchaseOrder(requestId: number): Promise<ActionState> {
     const session = await auth();
     if (!session?.user?.id) return { success: false, message: "No autorizado" };
-    const role = session.user.role?.toUpperCase() || "";
-    if (!['CEO', 'ADMINISTRADOR GENERAL', 'LOGISTICA', 'CONTADOR'].includes(role)) {
-        return { success: false, message: "No tienes permiso para Validar la compra." };
-    }
     try {
         await pool.query("CALL sp_validar_expediente_compra(?, ?)", [requestId, session.user.id]);
         revalidatePath("/compras/solicitudes");
@@ -499,12 +414,6 @@ export async function registerReception(formData: FormData): Promise<ActionState
     const session = await auth();
     if (!session?.user?.id) return { success: false, message: "No autorizado" };
 
-    const role = session.user.role?.toUpperCase() || "";
-    if (!['ADMIN_SUC', 'ALMACEN', 'LOGISTICA', 'ADMINISTRADOR GENERAL', 'CEO'].includes(role)) {
-        return { success: false, message: "Sin permisos de Almacén." };
-    }
-
-    // 1. Atrapamos los datos del formulario (Aquí está el guide_number que faltaba)
     const requestId = formData.get("request_id");
     const guideNumber = formData.get("guide_number") as string || "SIN-GUIA"; 
     const file = formData.get("file_guide") as File; 
@@ -528,31 +437,17 @@ export async function registerReception(formData: FormData): Promise<ActionState
             const rawName = (item.product_name || item.name || "Producto").trim();
             const qty = parseFloat(item.quantity);
             const uom = item.unit_measure || item.uom || 'UND'; 
-
             if (qty <= 0) continue;
 
-            // Enviamos los 8 parámetros al SP
             await pool.query(
                 "CALL sp_procesar_recepcion_item(?, ?, ?, ?, ?, ?, ?, ?)", 
-                [
-                    requestId, 
-                    session.user.id, 
-                    item.product_id || null, 
-                    rawName, 
-                    qty, 
-                    uom, 
-                    publicPath, 
-                    guideNumber // <--- Ahora ya no saldrá rojo porque está definido arriba
-                ]
+                [requestId, session.user.id, item.product_id || null, rawName, qty, uom, publicPath, guideNumber]
             );
         }
 
         revalidatePath("/compras/solicitudes");
         return { success: true, message: "Recepción registrada correctamente." };
-    } catch (error: any) { 
-        console.error("Error:", error);
-        return { success: false, message: error.message }; 
-    }
+    } catch (error: any) { return { success: false, message: error.message }; }
 }
 
 export async function getRequestReceptions(requestId: number) {
@@ -563,7 +458,7 @@ export async function getRequestReceptions(requestId: number) {
 }
 
 // ==============================================================================
-// 5. GESTIÓN DE ORDEN DE COMPRA (SQL SEGURO RESTAURADO -> PURGADO A SPs)
+// 5. GESTIÓN DE ORDEN DE COMPRA
 // ==============================================================================
 
 export async function createPurchaseOrderAction(data: any) {
@@ -571,10 +466,9 @@ export async function createPurchaseOrderAction(data: any) {
   try {
     await connection.beginTransaction();
 
-    // 1. Crear Cabecera y recuperar el ID
-    await connection.query("SET @new_id = 0");
-    await connection.query(
-      "CALL sp_crear_orden_cabecera(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, @new_id)",
+    // ✨ LIMPIO: Sin SET @new_id. El SP devuelve el ID
+    const [rows]: any = await connection.query(
+      "CALL sp_crear_orden_cabecera(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       [
         data.requestId, data.comprador_ruc, data.comprador_razon, data.comprador_direccion, data.solicitante,
         data.proveedor_ruc, data.proveedor_razon, data.proveedor_direccion, data.proveedor_contacto,
@@ -585,12 +479,9 @@ export async function createPurchaseOrderAction(data: any) {
       ]
     );
     
-    const [rows]: any = await connection.query("SELECT @new_id as id");
-    const ordenId = rows[0]?.id;
-    
+    const ordenId = rows[0][0]?.id;
     if (!ordenId) throw new Error("No se pudo obtener el ID de la orden generada.");
 
-    // 2. Insertar Detalles
     for (const item of data.items) {
       await connection.query(
         "CALL sp_insertar_orden_detalle(?, ?, ?, ?, ?, ?)",
@@ -611,28 +502,18 @@ export async function createPurchaseOrderAction(data: any) {
 export async function getPurchaseOrders(requestId: number) {
   try {
     const [rows]: any = await pool.query("CALL sp_listar_ordenes_solicitud(?)", [requestId]);
-    
-    // Al usar SP, la data viene en el índice [0]
     if (!rows[0] || rows[0].length === 0) return [];
     
     const ordersList = await Promise.all(rows[0].map(async (orden: any) => {
         const [items]: any = await pool.query("CALL sp_listar_detalles_orden(?)", [orden.id]);
-        
         return { 
             ...orden, 
             proveedor_razon: orden.proveedor_razon_social,
-            items: items[0].map((i: any) => ({
-                ...i,
-                codigo: i.codigo || "" 
-            }))
+            items: items[0].map((i: any) => ({ ...i, codigo: i.codigo || "" }))
         };
     }));
-    
     return ordersList;
-  } catch (error) { 
-    console.error("Error al obtener las órdenes:", error);
-    return []; 
-  }
+  } catch (error) { return []; }
 }
 
 export async function updatePurchaseOrderAction(data: any) {
@@ -640,7 +521,6 @@ export async function updatePurchaseOrderAction(data: any) {
   try {
     await connection.beginTransaction();
 
-    // 1. Actualizar Cabecera (Pasamos el ordenId primero)
     await connection.query(
       "CALL sp_actualizar_orden_cabecera(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       [
@@ -653,10 +533,8 @@ export async function updatePurchaseOrderAction(data: any) {
       ]
     );
 
-    // 2. Limpiar items antiguos
     await connection.query("CALL sp_eliminar_detalles_orden(?)", [data.ordenId]);
     
-    // 3. Insertar items nuevos
     for (const item of data.items) {
       await connection.query(
         "CALL sp_insertar_orden_detalle(?, ?, ?, ?, ?, ?)",
@@ -677,10 +555,8 @@ export async function deletePurchaseOrderAction(ordenId: number) {
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
-    // El SP ya hace los 2 DELETE y el UPDATE internamente
     await connection.query("CALL sp_eliminar_orden_completa(?)", [ordenId]);
     await connection.commit();
-    
     revalidatePath("/compras/solicitudes");
     return { success: true, message: "Orden eliminada correctamente" };
   } catch (error: any) { 
@@ -698,12 +574,7 @@ export async function obtenerReporteCompras(branchId: number, fechaInicio: strin
     try {
         const [rows]: any = await connection.query("CALL sp_compras_reporte_general(?, ?, ?)", [branchId, fechaInicio, fechaFin]);
         return { success: true, data: rows[0] };
-    } catch (error: any) {
-        console.error("Error Reporte Compras:", error);
-        return { success: false, data: [] };
-    } finally {
-        connection.release();
-    }
+    } catch (error: any) { return { success: false, data: [] }; } finally { connection.release(); }
 }
 
 export async function obtenerPrediccionCompras(branchId: number) {
@@ -711,12 +582,7 @@ export async function obtenerPrediccionCompras(branchId: number) {
     try {
         const [rows]: any = await connection.query("CALL sp_compras_prediccion(?)", [branchId]);
         return { success: true, data: rows[0] };
-    } catch (error: any) {
-        console.error("Error Predicción Compras:", error);
-        return { success: false, data: [] };
-    } finally {
-        connection.release();
-    }
+    } catch (error: any) { return { success: false, data: [] }; } finally { connection.release(); }
 }
 
 // ==============================================================================
@@ -725,16 +591,9 @@ export async function obtenerPrediccionCompras(branchId: number) {
 
 export async function searchProvidersAction(query: string) {
     if (!query || query.trim() === "") return [];
-    
     try {
-        // Busca en la tabla 'providers' por RUC o por Nombre
-        const [rows]: any = await pool.query(
-            "SELECT id, ruc, name, address, contact_name FROM providers WHERE ruc LIKE ? OR name LIKE ? LIMIT 10",
-            [`%${query}%`, `%${query}%`]
-        );
-        return rows;
-    } catch (error) {
-        console.error("Error buscando proveedores:", error);
-        return [];
-    }
+        // ✨ LIMPIO: SP de búsqueda
+        const [rows]: any = await pool.query("CALL sp_buscar_proveedores(?)", [query]);
+        return rows[0];
+    } catch (error) { return []; }
 }

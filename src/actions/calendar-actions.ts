@@ -7,10 +7,8 @@ import { revalidatePath } from "next/cache";
 export async function getHolidays() {
     const connection = await pool.getConnection();
     try {
-        const [rows]: any = await connection.query(
-            "SELECT * FROM calendar_holidays ORDER BY holiday_date ASC"
-        );
-        return { success: true, data: rows || [] };
+        const [rows]: any = await connection.query("CALL sp_listar_feriados()");
+        return { success: true, data: rows[0] || [] };
     } catch (error: any) {
         console.error("Error obteniendo calendario:", error);
         return { success: false, message: error.message, data: [] };
@@ -23,11 +21,8 @@ export async function getHolidays() {
 export async function addHoliday(fecha: string, descripcion: string, multiplicador: number) {
     const connection = await pool.getConnection();
     try {
-        await connection.query(
-            "INSERT INTO calendar_holidays (holiday_date, description, multiplier) VALUES (?, ?, ?)",
-            [fecha, descripcion, multiplicador]
-        );
-        revalidatePath('/configuracion/calendario'); // Ajusta esta ruta según tu estructura
+        await connection.query("CALL sp_agregar_feriado(?, ?, ?)", [fecha, descripcion, multiplicador]);
+        revalidatePath('/configuracion/calendario');
         return { success: true, message: "Día festivo agregado correctamente." };
     } catch (error: any) {
         if (error.code === 'ER_DUP_ENTRY') {
@@ -43,7 +38,7 @@ export async function addHoliday(fecha: string, descripcion: string, multiplicad
 export async function deleteHoliday(id: number) {
     const connection = await pool.getConnection();
     try {
-        await connection.query("DELETE FROM calendar_holidays WHERE id = ?", [id]);
+        await connection.query("CALL sp_eliminar_feriado(?)", [id]);
         revalidatePath('/configuracion/calendario');
         return { success: true, message: "Día festivo eliminado." };
     } catch (error: any) {
@@ -53,9 +48,7 @@ export async function deleteHoliday(id: number) {
     }
 }
 
-// --- AGREGAR AL FINAL DE src/actions/calendar-actions.ts ---
-
-// 4. Importar Feriados desde el Excel (Formato: "1 de enero", "Día", "Días feriados")
+// 4. Importar Feriados desde el Excel
 export async function importarCalendarioExcel(payload: { data: any[], year: number }) {
     const connection = await pool.getConnection();
     try {
@@ -63,7 +56,6 @@ export async function importarCalendarioExcel(payload: { data: any[], year: numb
         const feriadosData = payload.data;
         const anio = payload.year || new Date().getFullYear();
 
-        // Diccionario para traducir meses en texto a números
         const mesesMapeo: Record<string, string> = {
             'enero': '01', 'febrero': '02', 'marzo': '03', 'abril': '04',
             'mayo': '05', 'junio': '06', 'julio': '07', 'agosto': '08',
@@ -73,13 +65,11 @@ export async function importarCalendarioExcel(payload: { data: any[], year: numb
         let insertados = 0;
 
         for (const fila of feriadosData) {
-            // Buscamos las columnas según la imagen que me pasaste
             const fechaRaw = fila['Fecha'] || fila['fecha'];
             const descripcion = fila['Días feriados'] || fila['días feriados'] || fila['festividad'];
             
             if (!fechaRaw || !descripcion) continue;
 
-            // 1. Parsear "1 de enero" -> "2026-01-01"
             let fechaSql = null;
             const partesFecha = String(fechaRaw).toLowerCase().split(' de ');
             if (partesFecha.length === 2) {
@@ -91,22 +81,16 @@ export async function importarCalendarioExcel(payload: { data: any[], year: numb
                 }
             }
 
-            if (!fechaSql) continue; // Si no pudo convertir la fecha, salta a la siguiente
+            if (!fechaSql) continue;
 
-            // 2. Asignar Multiplicador Automático Inteligente
-            let multiplicador = 1.30; // Por defecto 30% más
+            let multiplicador = 1.30;
             const descLower = descripcion.toLowerCase();
-            if (descLower.includes('madre')) multiplicador = 2.00; // Día de la madre = x2
+            if (descLower.includes('madre')) multiplicador = 2.00;
             else if (descLower.includes('padre') || descLower.includes('navidad') || descLower.includes('año nuevo')) multiplicador = 1.80;
             else if (descLower.includes('independencia') || descLower.includes('patrias')) multiplicador = 1.50;
 
-            // 3. Insertar o Actualizar en Base de Datos
-            await connection.query(
-                `INSERT INTO calendar_holidays (holiday_date, description, multiplier) 
-                 VALUES (?, ?, ?) 
-                 ON DUPLICATE KEY UPDATE description = VALUES(description), multiplier = VALUES(multiplier)`,
-                [fechaSql, descripcion, multiplicador]
-            );
+            // ✅ CORRECCIÓN SEGURIDAD: SP para Upsert (Insert or Update)
+            await connection.query("CALL sp_upsert_feriado(?, ?, ?)", [fechaSql, descripcion, multiplicador]);
             insertados++;
         }
 
@@ -122,11 +106,11 @@ export async function importarCalendarioExcel(payload: { data: any[], year: numb
     }
 }
 
-// 5. Actualizar el multiplicador rápidamente desde la tabla
+// 5. Actualizar el multiplicador
 export async function updateHolidayMultiplier(id: number, newMultiplier: number) {
     const connection = await pool.getConnection();
     try {
-        await connection.query("UPDATE calendar_holidays SET multiplier = ? WHERE id = ?", [newMultiplier, id]);
+        await connection.query("CALL sp_actualizar_multiplicador_feriado(?, ?)", [id, newMultiplier]);
         revalidatePath('/configuracion/calendario');
         return { success: true };
     } catch (error: any) {

@@ -38,31 +38,22 @@ export async function obtenerHistorialProyecciones(branchId: number) {
 export async function obtenerDetalleProyeccion(projectionId: number) {
     const connection = await pool.getConnection();
     try {
-        // Traemos Platillos
-        const [articulos]: any = await connection.query(
-            "SELECT product_name AS producto, projected_qty AS cantidad, projected_revenue AS ingresos FROM sales_projection_details WHERE projection_id = ? ORDER BY ingresos DESC", 
-            [projectionId]
-        );
-        // Traemos Horas
-        const [horas]: any = await connection.query(
-            "SELECT hour_of_day AS hora, projected_sales AS cantidad FROM sales_projection_hourly WHERE projection_id = ? ORDER BY CAST(hora AS UNSIGNED) ASC", 
-            [projectionId]
-        );
-        // Traemos Stock
-        const [stock]: any = await connection.query(
-            "SELECT ingredient_name AS insumo, required_qty AS cantidad, unit AS unidad FROM sales_projection_stock WHERE projection_id = ?", 
+        // ✨ Cero SQL crudo. Un solo viaje a la base de datos para traer los 3 bloques.
+        const [results]: any = await connection.query(
+            "CALL sp_obtener_detalle_proyeccion(?)", 
             [projectionId]
         );
 
         return { 
             success: true, 
             data: {
-                articulos: articulos || [],
-                horas: horas || [],
-                stock: stock || []
+                articulos: results[0] || [], // Primer SELECT (Platillos)
+                horas: results[1] || [],     // Segundo SELECT (Horas)
+                stock: results[2] || []      // Tercer SELECT (Stock/Insumos)
             }
         };
     } catch (error: any) {
+        console.error("Error obteniendo detalles de proyección:", error);
         return { success: false, data: { articulos: [], horas: [], stock: [] } };
     } finally {
         connection.release();

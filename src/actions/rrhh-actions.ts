@@ -1,17 +1,12 @@
 'use server'
 
 import { pool } from "@/lib/db"; 
-// Agrega estas líneas debajo de tus otras importaciones:
 import { revalidatePath } from "next/cache";
-import { writeFile, mkdir, unlink } from 'fs/promises'; // ✨ Agregamos unlink para borrar PDFs
+import { writeFile, mkdir, unlink } from 'fs/promises';
 import path from 'path';
 import { auth } from "@/auth";
 
-
-// ... aquí sigue el resto de tu código ...
-
-// 1. OBTENER EMPLEADOS POR SUCURSAL (SOLO LLAMA AL SP)
-// 1. OBTENER EMPLEADOS POR SUCURSAL (SOLO LLAMA AL SP)
+// 1. OBTENER EMPLEADOS POR SUCURSAL
 export async function getEmpleadosPorSucursal(branchId: number) {
     const connection = await pool.getConnection();
     try {
@@ -25,11 +20,10 @@ export async function getEmpleadosPorSucursal(branchId: number) {
     }
 }
 
-// CREAR EMPLEADO
+// 2. CREAR EMPLEADO
 export async function crearEmpleado(data: any) {
     const connection = await pool.getConnection();
     try {
-        // Formateamos la fecha a nulo si viene vacía
         const fechaNac = data.fecha_nacimiento ? data.fecha_nacimiento : null;
         
         await connection.query(
@@ -38,15 +32,12 @@ export async function crearEmpleado(data: any) {
         );
         return { success: true, message: "Empleado creado correctamente." };
     } catch (error: any) {
-        // ✨ Detectamos si el error es por un DNI duplicado en MySQL
         if (error.code === 'ER_DUP_ENTRY' || (error.message && error.message.includes('Duplicate entry'))) {
             return { 
                 success: false, 
                 message: "⚠️ Este número de documento ya pertenece a otro empleado registrado." 
             };
         }
-        
-        // Si es otro tipo de error, enviamos el mensaje real de SQL para saber qué pasa
         return { 
             success: false, 
             message: error.sqlMessage || error.message || "Error desconocido al crear empleado." 
@@ -74,6 +65,7 @@ export async function registrarAsistencia(employeeId: number, estadoId: number) 
         connection.release();
     }
 }
+
 // 4. OBTENER MATRIZ DE HORARIOS POR SEMANA EXACTA
 export async function obtenerHorariosSemana(branchId: number, fechaInicio: string, fechaFin: string) {
     const connection = await pool.getConnection();
@@ -88,7 +80,7 @@ export async function obtenerHorariosSemana(branchId: number, fechaInicio: strin
     }
 }
 
-// 5. GUARDAR UN TURNO (AHORA CON "FORCE" PARA SALTAR LA ALERTA SI EL JEFE LO DESEA)
+// 5. GUARDAR UN TURNO
 export async function guardarHorarioEmpleado(employeeId: number, fecha: string, horaInicio: string, horaFin: string, horasTotales: number, force: boolean = false, estado: number = 0) {
     const connection = await pool.getConnection();
     try {
@@ -100,7 +92,6 @@ export async function guardarHorarioEmpleado(employeeId: number, fecha: string, 
         const [dispRows]: any = await connection.query("CALL sp_rrhh_obtener_disponibilidad(?)", [employeeId]);
         const disponibilidad = dispRows[0];
 
-        // ✨ GUARDIÁN FLEXIBLE (Solo alerta si "force" es falso)
         if (!force && disponibilidad && disponibilidad.length > 0) {
             const reglaDelDia = disponibilidad.find((d: any) => d.dia_semana === dayOfWeek);
             
@@ -112,7 +103,6 @@ export async function guardarHorarioEmpleado(employeeId: number, fecha: string, 
             }
         }
 
-        // Guardamos (0 = Borrador, 1 = Aplicado)
         await connection.query("CALL sp_rrhh_guardar_horario(?, ?, ?, ?, ?, ?)", [employeeId, fecha, horaInicio, horaFin, horasTotales, estado]);
         return { success: true, message: "Turno guardado en borrador." };
     } catch (error: any) {
@@ -122,7 +112,7 @@ export async function guardarHorarioEmpleado(employeeId: number, fecha: string, 
     }
 }
 
-// EDITAR EMPLEADO
+// 6. EDITAR EMPLEADO
 export async function editarEmpleado(data: any) {
     const connection = await pool.getConnection();
     try {
@@ -140,14 +130,11 @@ export async function editarEmpleado(data: any) {
     }
 }
 
-// 7. OBTENER CATÁLOGOS PARA LOS DESPLEGABLES DEL FORMULARIO
+// 7. OBTENER CATÁLOGOS PARA LOS DESPLEGABLES
 export async function obtenerCatalogosRRHH() {
     const connection = await pool.getConnection();
     try {
         const [rows]: any = await connection.query("CALL sp_rrhh_obtener_catalogos()");
-        
-        // MySQL devuelve múltiples resultados en orden. 
-        // rows[0] son los documentos, rows[1] son los cargos
         return { 
             success: true, 
             documentos: rows[0] || [], 
@@ -180,8 +167,7 @@ export async function marcarAsistenciaPorDocumento(numeroDocumento: string) {
     const connection = await pool.getConnection();
     try {
         const [rows]: any = await connection.query("CALL sp_rrhh_marcar_asistencia_por_doc(?)", [numeroDocumento]);
-        
-        const data = rows[0][0]; // El SP devuelve la respuesta estructurada
+        const data = rows[0][0]; 
         
         return { 
             success: data.resultado !== 'ERROR', 
@@ -210,8 +196,7 @@ export async function verificarEstadoKiosko(documento: string) {
     }
 }
 
-// 11. OBTENER LISTA DE SUCURSALES
-// 11. OBTENER LISTA DE SUCURSALES (CON FILTRO DE SEGURIDAD)
+// 11. OBTENER LISTA DE SUCURSALES (CON FILTRO DE SEGURIDAD BLINDADO)
 export async function obtenerSucursales() {
     const session = await auth();
     if (!session?.user) return { success: false, data: [], defaultBranchId: 1 };
@@ -221,7 +206,6 @@ export async function obtenerSucursales() {
 
     const connection = await pool.getConnection();
     try {
-        // Obtenemos todas las sucursales del SP
         const [rows]: any = await connection.query("CALL sp_rrhh_obtener_sucursales()");
         const todasLasSucursales = rows[0] || [];
 
@@ -231,19 +215,15 @@ export async function obtenerSucursales() {
             return { success: true, data: todasLasSucursales, defaultBranchId: 1 };
         }
 
-        // Cruzamos con user_branches para administradores de sucursal
-        const [userBranches]: any = await connection.query(`
-            SELECT DISTINCT b.id, b.name 
-            FROM branches b
-            INNER JOIN user_branches ub ON b.id = ub.branch_id
-            WHERE ub.user_id = ? AND b.status = 1
-        `, [userId]);
+        // ✨ Cero SQL Crudo: Llamada al SP de seguridad
+        const [userBranchesResult]: any = await connection.query("CALL sp_obtener_sucursales_usuario(?)", [userId]);
+        const userBranches = userBranchesResult[0];
 
-        if (userBranches.length > 0) {
+        if (userBranches && userBranches.length > 0) {
             return { 
                 success: true, 
                 data: userBranches, 
-                defaultBranchId: userBranches[0].id // Extraemos el ID real exacto
+                defaultBranchId: userBranches[0].id 
             };
         }
 
@@ -289,10 +269,8 @@ export async function guardarDisponibilidad(employeeId: number, diasDisponibles:
     try {
         await connection.beginTransaction();
         
-        // Primero limpiamos la disponibilidad anterior
         await connection.query("CALL sp_rrhh_limpiar_disponibilidad(?)", [employeeId]);
         
-        // Guardamos los nuevos rangos
         for (const dia of diasDisponibles) {
             await connection.query("CALL sp_rrhh_guardar_disponibilidad(?, ?, ?, ?)", 
                 [employeeId, dia.dia_semana, dia.hora_inicio, dia.hora_fin]
@@ -315,7 +293,6 @@ export async function autogenerarHorarioSemana(branchId: number, fechaInicio: st
     try {
         await connection.beginTransaction();
         
-        // ✨ Reemplazo limpio con SP
         const [empsResult]: any = await connection.query("CALL sp_listar_empleados_activos_sucursal(?)", [branchId]);
         const emps = empsResult[0] || [];
         
@@ -339,7 +316,6 @@ export async function autogenerarHorarioSemana(branchId: number, fechaInicio: st
                         let diff = (hFin + mFin / 60) - (hInicio + mInicio / 60);
                         if (diff < 0) diff += 24;
 
-                        // Lo guarda como borrador (estado 0)
                         await connection.query("CALL sp_rrhh_guardar_horario(?, ?, ?, ?, ?, 0)", [emp.id, fechaStr, regla.hora_inicio, regla.hora_fin, diff]);
                     }
                 }
@@ -368,13 +344,11 @@ export async function publicarHorariosSemana(branchId: number, fechaInicio: stri
     }
 }
 
-// 18. ELIMINAR UN TURNO ESPECÍFICO (SOLO LLAMA AL SP)
+// 18. ELIMINAR UN TURNO ESPECÍFICO
 export async function eliminarHorarioEmpleado(employeeId: number, fecha: string) {
     const connection = await pool.getConnection();
     try {
-        // ✨ Cero SQL directo, pura llamada al Procedimiento Almacenado
         await connection.query("CALL sp_rrhh_eliminar_horario(?, ?)", [employeeId, fecha]);
-        
         return { success: true, message: "Turno eliminado correctamente." };
     } catch (error: any) {
         console.error("Error al eliminar horario:", error);
@@ -412,19 +386,12 @@ export async function obtenerReporteHoras(branchId: number, fechaInicio: string,
     }
 }
 
+// 21. OBTENER NOTIFICACIONES GENERALES (BLINDADO)
 export async function obtenerNotificacionesGenerales(userId: number) {
     const connection = await pool.getConnection();
     try {
-        // Traemos las notificaciones no leídas de este usuario (máximo 10 para no saturar)
-        const [rows]: any = await connection.query(
-            `SELECT id, title, message, created_at 
-             FROM notifications 
-             WHERE user_id = ? AND is_read = 0 
-             ORDER BY created_at DESC 
-             LIMIT 10`, 
-            [userId]
-        );
-        return { success: true, data: rows };
+        const [rows]: any = await connection.query("CALL sp_obtener_notificaciones_usuario(?)", [userId]);
+        return { success: true, data: rows[0] || [] };
     } catch (error: any) {
         console.error("Error trayendo notificaciones:", error);
         return { success: false, data: [] };
@@ -433,15 +400,12 @@ export async function obtenerNotificacionesGenerales(userId: number) {
     }
 }
 
-// --- NUEVO: OBTENER CONTRATOS ---
+// 22. OBTENER CONTRATOS (BLINDADO)
 export async function getContratosEmpleado(employeeId: number) {
     const connection = await pool.getConnection();
     try {
-        const [rows]: any = await connection.query(
-            "SELECT * FROM employee_contracts WHERE employee_id = ? ORDER BY fecha_vencimiento DESC",
-            [employeeId]
-        );
-        return { success: true, data: rows || [] };
+        const [rows]: any = await connection.query("CALL sp_listar_contratos_empleado(?)", [employeeId]);
+        return { success: true, data: rows[0] || [] };
     } catch (error: any) {
         return { success: false, message: error.message };
     } finally {
@@ -449,7 +413,7 @@ export async function getContratosEmpleado(employeeId: number) {
     }
 }
 
-// --- NUEVO: SUBIR CONTRATO PDF ---
+// 23. SUBIR CONTRATO PDF (BLINDADO)
 export async function subirContratoEmpleado(formData: FormData) {
     const file = formData.get('file') as File;
     const employeeId = Number(formData.get('employeeId'));
@@ -461,28 +425,20 @@ export async function subirContratoEmpleado(formData: FormData) {
 
     const connection = await pool.getConnection();
     try {
-        // 1. Convertir el archivo a bytes
         const bytes = await file.arrayBuffer();
         const buffer = Buffer.from(bytes);
-
-        // 2. Generar un nombre único y preparar la ruta pública
         const filename = `contrato_${employeeId}_${Date.now()}.pdf`;
         const uploadDir = path.join(process.cwd(), 'public', 'contratos');
         
-        // Crear la carpeta si no existe
         try { await mkdir(uploadDir, { recursive: true }); } catch (e) {}
 
         const filepath = path.join(uploadDir, filename);
-        
-        // 3. Guardar el PDF físico en el proyecto
         await writeFile(filepath, buffer);
-        const fileUrl = `/contratos/${filename}`; // Ruta para leer en la web
-
+        const fileUrl = `/contratos/${filename}`;
         const fechaSubida = new Date().toISOString().split('T')[0];
 
-        // 4. Guardar en la base de datos
         await connection.query(
-            "INSERT INTO employee_contracts (employee_id, file_url, fecha_subida, fecha_vencimiento) VALUES (?, ?, ?, ?)",
+            "CALL sp_registrar_contrato_empleado(?, ?, ?, ?)", 
             [employeeId, fileUrl, fechaSubida, fechaVencimiento]
         );
 
@@ -496,15 +452,12 @@ export async function subirContratoEmpleado(formData: FormData) {
     }
 }
 
-// --- ELIMINAR CONTRATO (Físico y Base de Datos) ---
-// --- ELIMINAR CONTRATO (Físico y Base de Datos) ---
+// 24. ELIMINAR CONTRATO
 export async function eliminarContratoEmpleado(contratoId: number, fileUrl: string) {
     const connection = await pool.getConnection();
     try {
-        // ✨ Llamada limpia al SP
         await connection.query("CALL sp_eliminar_contrato_empleado(?)", [contratoId]);
 
-        // Intentamos borrar el PDF físico de la carpeta 'public'
         try {
             const filepath = path.join(process.cwd(), 'public', fileUrl);
             await unlink(filepath);
@@ -521,14 +474,11 @@ export async function eliminarContratoEmpleado(contratoId: number, fileUrl: stri
     }
 }
 
-// --- OBTENER ALERTAS DE CONTRATOS POR VENCER (<= 10 DÍAS) ---
+// 25. OBTENER ALERTAS DE CONTRATOS POR VENCER
 export async function obtenerNotificacionesContratos() {
     const connection = await pool.getConnection();
     try {
-        // ✨ Llamada limpia al SP
         const [rows]: any = await connection.query("CALL sp_obtener_alertas_contratos()");
-        
-        // rows[0] porque los CALL devuelven la data dentro del primer elemento
         return { success: true, data: rows[0] };
     } catch (error: any) {
         return { success: false, message: error.message };
@@ -537,7 +487,7 @@ export async function obtenerNotificacionesContratos() {
     }
 }
 
-// --- OBTENER EL DESGLOSE DIARIO DE HORAS DE UN EMPLEADO ---
+// 26. OBTENER EL DESGLOSE DIARIO DE HORAS DE UN EMPLEADO
 export async function obtenerDetalleHorasEmpleado(employeeId: number, startDate: string, endDate: string) {
     const connection = await pool.getConnection();
     try {

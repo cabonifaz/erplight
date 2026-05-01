@@ -66,17 +66,20 @@ export async function cambiarPasswordUsuario(passwordActual: string, nuevaPasswo
     const connection = await pool.getConnection();
 
     try {
-        // 1. Obtener la contraseña actual encriptada de la base de datos
+        // ✅ CORRECCIÓN SEGURIDAD: Usamos un SP en lugar del SELECT directo
         const [rows]: any = await connection.query(
-            "SELECT password FROM users WHERE id = ?", 
+            "CALL sp_obtener_password_usuario(?)", 
             [userId]
         );
 
-        if (rows.length === 0) {
+        // Como es un SP, los resultados vienen dentro de un array extra (rows[0])
+        const userData = rows[0];
+
+        if (!userData || userData.length === 0) {
             return { success: false, message: "Usuario no encontrado." };
         }
 
-        const passwordDB = rows[0].password;
+        const passwordDB = userData[0].password;
 
         // 2. Comparar la contraseña ingresada con la de la BD usando bcrypt
         const esCorrecta = await bcrypt.compare(passwordActual, passwordDB);

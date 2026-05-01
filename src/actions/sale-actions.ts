@@ -17,12 +17,10 @@ export async function validateExcelSales(payload: { data: any[], branchId: numbe
     const connection = await pool.getConnection();
 
     try {
-        // ✨ EXTRAEMOS FECHAS Y TICKETS DEL EXCEL (Con el nuevo formato seguro)
         const fechasEnExcel = [...new Set(ventasData.map(fila => {
             const fechaRaw = fila['Fecha'] || fila['fecha'];
             if (!fechaRaw) return null;
             
-            // Usamos la misma lógica robusta para la validación
             const dateObj = new Date(fechaRaw);
             if (!isNaN(dateObj.getTime())) {
                  const yyyy = dateObj.getFullYear();
@@ -37,7 +35,7 @@ export async function validateExcelSales(payload: { data: any[], branchId: numbe
             fila['Serie y correlativo'] || fila['Serie y Correlativo']
         ).filter(Boolean))];
 
-        // ✨ REGLA 1: VALIDACIÓN DE CIERRE DIARIO (BLOQUEO ESTRICTO)
+        // REGLA 1: VALIDACIÓN DE CIERRE DIARIO
         if (fechasEnExcel.length > 0) {
             const fechasJSON = JSON.stringify(fechasEnExcel);
             const [cierreResult]: any = await connection.query("CALL sp_verificar_cierres_diarios(?, ?)", [branchId, fechasJSON]);
@@ -53,7 +51,7 @@ export async function validateExcelSales(payload: { data: any[], branchId: numbe
             }
         }
 
-        // ✨ REGLA 2: VALIDACIÓN DE DUPLICADOS (ADVERTENCIA / CORRECCIÓN)
+        // REGLA 2: VALIDACIÓN DE DUPLICADOS
         if (ticketsEnExcel.length > 0) {
             const ticketsJSON = JSON.stringify(ticketsEnExcel);
             const [spResult]: any = await connection.query("CALL sp_verificar_tickets_duplicados(?, ?)", [branchId, ticketsJSON]);
@@ -69,7 +67,6 @@ export async function validateExcelSales(payload: { data: any[], branchId: numbe
             }
         }
 
-        // --- CÓDIGO DE AGRUPACIÓN Y VALIDACIÓN DE INVENTARIO (INTACTO) ---
         const ventasAgrupadas = new Map();
         const productosTotalesReales: Record<string, number> = {};
 
@@ -151,7 +148,6 @@ export async function validateExcelSales(payload: { data: any[], branchId: numbe
     }
 }
 
-
 // --- 2. FUNCIÓN DE PROCESAMIENTO (VERSIÓN ULTRA RÁPIDA CON JSON) ---
 export async function processExcelSales(payload: { data: any[], branchId: number }) {
     const session = await auth();
@@ -167,7 +163,6 @@ export async function processExcelSales(payload: { data: any[], branchId: number
         const ventasAgrupadas = new Map();
         const nombresUnicos = new Set<string>(); 
 
-        // --- BUCLE 1: TU LÓGICA ORIGINAL ---
         for (const fila of ventasData) {
             const findValue = (keywords: string[]) => {
                 const exactKey = Object.keys(fila).find(k => 
@@ -192,18 +187,15 @@ export async function processExcelSales(payload: { data: any[], branchId: number
             const docType = findValue(['tipo de documento']) || 'Ticket';
             const clientDoc = String(findValue(['cliente / ruc / dni']) || '');
 
-            // ✨ NUEVA LÓGICA DE FECHAS A PRUEBA DE FALLOS ✨
             let fechaExcelFormateada = null;
             const fechaRaw = findValue(['fecha']);
 
             if (fechaRaw) {
-                // 1. Si Excel lo mandó como número serial de días (muy común)
                 if (typeof fechaRaw === 'number') {
                     const dias = fechaRaw - 25569;
                     const fechaLocal = new Date((dias * 86400 * 1000) + (new Date().getTimezoneOffset() * 60000));
                     fechaExcelFormateada = fechaLocal.toISOString().slice(0, 19).replace('T', ' ');
                 } 
-                // 2. Si Excel lo mandó como texto ("4/27/26", "2026-04-27", etc.)
                 else {
                     const dateObj = new Date(fechaRaw);
                     if (!isNaN(dateObj.getTime())) {
@@ -219,7 +211,6 @@ export async function processExcelSales(payload: { data: any[], branchId: number
                 }
             }
 
-            // Fallback: Si todo falla, usa la fecha actual
             if (!fechaExcelFormateada) {
                 const now = new Date();
                 const tzOffset = now.getTimezoneOffset() * 60000; 
@@ -256,7 +247,6 @@ export async function processExcelSales(payload: { data: any[], branchId: number
             }
         }
 
-        // --- BUCLE 2 OPTIMIZADO: Mapeo de IDs y Creación de JSON ---
         await connection.beginTransaction();
 
         const catalogo = new Map();
@@ -304,19 +294,17 @@ export async function processExcelSales(payload: { data: any[], branchId: number
         connection.release();
     }
 }
+
 export async function getReporteVentas(filtros: {
     branchId?: number | null;
     fechaInicio?: string | null;
     fechaFin?: string | null;
     metodoPago?: string | null;
 }) {
-    // 1. Obtenemos la sesión del usuario para saber quién está pidiendo el reporte
     const session = await auth();
     if (!session?.user) return { success: false, message: "No autorizado", data: [] };
 
-    // ✨ CORRECCIÓN TYPESCRIPT: Evita las líneas rojas
     const sessionUser = session.user as any;
-
     const role = sessionUser.role?.toUpperCase().trim() || "";
     const userId = sessionUser.id || sessionUser.sub || sessionUser.userId || sessionUser.id_usuario;
 
@@ -328,37 +316,21 @@ export async function getReporteVentas(filtros: {
         const fFin = filtros.fechaFin || null;
         const mPago = filtros.metodoPago || null;
 
-        // Validamos si es un superusuario que SÍ tiene derecho a ver toda la empresa
         const isGerente = role === 'GERENTE GENERAL' || role === 'CEO' || role === 'ADMINISTRADOR GENERAL';
 
-        // =========================================================================
-        // CASO A: Eligió una sucursal específica (bId no es nulo) O es Gerente
-        // =========================================================================
         if (bId !== null || isGerente) {
-            // El SP funciona normal. Si es gerente y bId es null, traerá todo.
             const [rows]: any = await connection.query("CALL sp_reporte_ventas(?, ?, ?, ?)", [bId, fInicio, fFin, mPago]);
             return { success: true, data: rows[0] || [] };
         } 
-        
-        // =========================================================================
-        // CASO B: Es Zonal/Admin, eligió "Todas las sucursales" (bId es null)
-        // =========================================================================
-       // =========================================================================
-        // CASO B: Es Zonal/Admin, eligió "Todas las sucursales" (bId es null)
-        // =========================================================================
         else {
-            // ✨ CORRECCIÓN: Agregamos DISTINCT para evitar que las sedes repetidas dupliquen las ventas
-            const [sedesAsignadas]: any = await connection.query(
-                `SELECT DISTINCT branch_id FROM user_branches WHERE user_id = ?`, 
-                [userId]
-            );
+            // ✨ CORRECCIÓN 1: Llamada limpia al SP
+            const [sedesResult]: any = await connection.query("CALL sp_obtener_sedes_usuario(?)", [userId]);
+            const sedesAsignadas = sedesResult[0];
 
-            // Si por algún error no tiene sedes, le devolvemos un array vacío por seguridad
             if (!sedesAsignadas || sedesAsignadas.length === 0) {
                 return { success: true, data: [] }; 
             }
 
-            // 2. Iteramos sobre sus sedes autorizadas y consultamos el SP una por una
             let ventasCombinadas: any[] = [];
             
             for (const sede of sedesAsignadas) {
@@ -367,18 +339,15 @@ export async function getReporteVentas(filtros: {
                     [sede.branch_id, fInicio, fFin, mPago]
                 );
                 
-                // Si la sede tiene ventas en ese rango de fechas, las sumamos al bloque total
                 if (rows[0] && rows[0].length > 0) {
                     ventasCombinadas = [...ventasCombinadas, ...rows[0]];
                 }
             }
 
-            // 3. Ordenamos toda la data combinada por fecha (las más recientes primero)
             ventasCombinadas.sort((a, b) => new Date(b.sale_date).getTime() - new Date(a.sale_date).getTime());
 
             return { success: true, data: ventasCombinadas };
         }
-
     } catch (error: any) {
         console.error("Error obteniendo reporte:", error);
         return { success: false, message: error.message, data: [] };
@@ -386,6 +355,7 @@ export async function getReporteVentas(filtros: {
         connection.release();
     }
 }
+
 export async function obtenerHistorialCargas() {
     const session = await auth();
     if (!session?.user?.id) return { success: false, message: "No autorizado", data: [] };
@@ -395,27 +365,20 @@ export async function obtenerHistorialCargas() {
 
     const connection = await pool.getConnection();
     try {
-        // 1. Obtenemos todo el historial de la BD
         const [rows]: any = await connection.query("CALL sp_obtener_historial_cargas()");
         const todoElHistorial = rows[0] || [];
 
-        // 2. Roles privilegiados que ven todo
         const PRIVILEGED_ROLES = ["GERENTE GENERAL", "ADMINISTRADOR GENERAL", "LOGISTICA", "CEO"];
         
         if (PRIVILEGED_ROLES.includes(role)) {
             return { success: true, data: todoElHistorial };
         } 
         
-        // 3. Lógica con INNER JOIN (La que comprobamos que funciona)
-        const [branchRows]: any = await connection.query(`
-            SELECT DISTINCT b.name 
-            FROM branches b
-            INNER JOIN user_branches ub ON b.id = ub.branch_id
-            WHERE ub.user_id = ?
-        `, [userId]);
+        // ✨ CORRECCIÓN 2: Llamada limpia al SP
+        const [branchRowsResult]: any = await connection.query("CALL sp_obtener_nombres_sedes_usuario(?)", [userId]);
+        const branchRows = branchRowsResult[0];
         
-        if (branchRows.length > 0) {
-            // Normalizamos a minúsculas y sin espacios al final
+        if (branchRows && branchRows.length > 0) {
             const nombresPermitidos = branchRows.map((r: any) => String(r.name).trim().toLowerCase());
 
             const historialFiltrado = todoElHistorial.filter((log: any) => {
@@ -426,7 +389,6 @@ export async function obtenerHistorialCargas() {
             return { success: true, data: historialFiltrado };
         }
         
-        // Si no tiene sedes asignadas, enviamos vacío
         return { success: true, data: [] };
 
     } catch (error: any) {
@@ -478,9 +440,6 @@ export async function getMenuPOS(requestedBranchId?: number) {
     // @ts-ignore
     const userBranchId = session.user.branch_id || 1; 
 
-    // LÓGICA DE SEGURIDAD: 
-    // Si es Gerente General y pide una sucursal específica, le damos acceso.
-    // Si es cualquier otro rol, lo forzamos a usar SU sucursal (userBranchId).
     let targetBranchId = userBranchId;
     if (userRole === 'GERENTE GENERAL' && requestedBranchId) {
         targetBranchId = requestedBranchId;
@@ -499,8 +458,6 @@ export async function getMenuPOS(requestedBranchId?: number) {
     }
 }
 
-// AGREGA ESTA FUNCIÓN AL FINAL DE TU ARCHIVO sale-actions.ts
-
 // ✨ AÑADIMOS paymentMethod COMO SEXTO PARÁMETRO
 export async function processSalePOS(branchId: number, total: number, cart: any[], clientDocument: string = "", paymentMethod: string = "EFECTIVO") {
     const session = await auth();
@@ -512,7 +469,6 @@ export async function processSalePOS(branchId: number, total: number, cart: any[
 
     const connection = await pool.getConnection();
     try {
-        // ✨ PASAMOS EL SEXTO PARÁMETRO A MYSQL
         await connection.query("CALL sp_procesar_venta_pos(?, ?, ?, ?, ?, ?)", [branchId, userId, total, cartJson, clientDocument, paymentMethod]);
         return { success: true, message: "¡Venta procesada exitosamente! Stock actualizado." };
     } catch (error: any) {

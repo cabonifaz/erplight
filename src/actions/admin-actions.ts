@@ -60,10 +60,8 @@ export async function getUsers() {
 export async function createUser(selectedBranchIds: number[], formData: FormData) {
     const name = formData.get("name")?.toString();
     const email = formData.get("email")?.toString();
-    // 🔑 1. Quitamos la lectura del password del formData
     const role = formData.get("role")?.toString(); 
 
-    // 🔑 2. Ya no validamos que el password venga en el formulario
     if (!name || !email || !role) {
         return { success: false, message: "Nombre, email y rol son obligatorios." };
     }
@@ -72,44 +70,32 @@ export async function createUser(selectedBranchIds: number[], formData: FormData
     try {
         await connection.beginTransaction();
 
-        // 🔑 3. Generar contraseña aleatoria (8 caracteres: números y letras minúsculas)
+        // Generar contraseña aleatoria
         const generatedPassword = Math.random().toString(36).slice(-8);
-
-        // 🔑 4. Encriptar la contraseña generada
         const hashedPassword = await bcrypt.hash(generatedPassword, 10);
 
-        // Crear usuario y capturar el nuevo ID
-        await connection.query("SET @new_id = 0");
-        await connection.query(
-            "CALL sp_crear_usuario(?, ?, ?, ?, @new_id)", 
-            [name, email, hashedPassword, role] // Mandamos el hashedPassword
+        // ✅ CORRECCIÓN SEGURIDAD: Llamada 100% limpia. 
+        // El SP ahora debe devolver el ID directamente como resultado.
+        const [result]: any = await connection.query(
+            "CALL sp_crear_usuario(?, ?, ?, ?)", 
+            [name, email, hashedPassword, role]
         );
-        const [idResult]: any = await connection.query("SELECT @new_id as id");
-        const newUserId = idResult[0]?.id;
+        
+        // Capturamos el ID que el SP nos devuelve (depende de cómo armes el SELECT en tu SP)
+        const newUserId = result[0][0]?.id;
 
         if (!newUserId) throw new Error("Error al obtener el ID del usuario creado.");
 
         // Lógica de asignación usando SPs
         const rolesGlobales = ['GERENTE GENERAL', 'GERENTE DE LOGISTICA', 'JEFE DE RRHH'];
 
-// 2. Verificamos si el rol creado está en esa lista
-if (rolesGlobales.includes(role || "")) {
-    // Si es global, le damos acceso a todas las sedes automáticamente
-    await connection.query("CALL sp_asignar_sucursales_gerente(?)", [newUserId]);
-} else {
-    // Si NO es global (Almacenero, Admin Sucursal), validamos que se haya marcado algo
-    if (selectedBranchIds.length === 0) {
-        throw new Error("Debes asignar al menos una sucursal para este rol.");
-    }
-    for (let i = 0; i < selectedBranchIds.length; i++) {
-        const branchId = selectedBranchIds[i];
-        const isMain = i === 0 ? 1 : 0; 
-        await connection.query(
-            "CALL sp_asignar_sucursal_usuario(?, ?, ?)", 
-            [newUserId, branchId, isMain]
-        );
-    }
-
+        if (rolesGlobales.includes(role || "")) {
+            await connection.query("CALL sp_asignar_sucursales_gerente(?)", [newUserId]);
+        } else {
+            if (selectedBranchIds.length === 0) {
+                throw new Error("Debes asignar al menos una sucursal para este rol.");
+            }
+            // ✅ CORRECCIÓN BUG: Bucle duplicado eliminado. Ahora solo se ejecuta una vez.
             for (let i = 0; i < selectedBranchIds.length; i++) {
                 const branchId = selectedBranchIds[i];
                 const isMain = i === 0 ? 1 : 0; 
@@ -123,7 +109,6 @@ if (rolesGlobales.includes(role || "")) {
         await connection.commit();
         revalidatePath("/dashboard/usuarios"); 
         
-        // 🔑 5. Retornamos la contraseña en el mensaje de éxito para que el sistema la muestre en la alerta
         return { 
             success: true, 
             message: `Usuario creado. Contraseña generada: ${generatedPassword}` 
