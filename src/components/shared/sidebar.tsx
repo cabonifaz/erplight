@@ -13,6 +13,9 @@ import {
 } from "lucide-react";
 import { getLogoUrl } from "@/actions/client-actions"; 
 
+// ✨ IMPORTAMOS LA NUEVA FUNCIÓN (Asegúrate de que la ruta coincida con tu estructura)
+import { getPermisosMenu } from "@/actions/menu-actions"; 
+
 interface MenuItem {
   label: string;
   icon: any; 
@@ -33,7 +36,7 @@ export const menuItems: MenuItem[] = [
     ]
   },
   { href: "/compras/solicitudes", label: "Solicitudes Compra", icon: ClipboardList },
-  { href: "/compras/registro", label: "Ingresar Facturas", icon: Truck },
+
   { 
     label: "Inventario", 
     icon: Package, 
@@ -64,16 +67,32 @@ export function Sidebar({ user }: { user?: any }) {
   const [searchTerm, setSearchTerm] = useState("");
   const [openMenus, setOpenMenus] = useState<Record<string, boolean>>({ "Ventas & OC": true });
   const [logoUrl, setLogoUrl] = useState<string>(""); 
+  
+  // ✨ ESTADO PARA LOS PERMISOS DINÁMICOS
+  const [allowedMenus, setAllowedMenus] = useState<string[] | null>(null);
 
   useEffect(() => {
-      const fetchLogo = async () => {
-          const res = await getLogoUrl();
-          if (res.success && res.url) {
-              setLogoUrl(res.url);
+      const fetchData = async () => {
+          // Cargar el Logo
+          const resLogo = await getLogoUrl();
+          if (resLogo.success && resLogo.url) {
+              setLogoUrl(resLogo.url);
+          }
+
+          // ✨ Cargar los permisos desde la Base de Datos según el ROL
+          if (user?.role) {
+              const resPermisos = await getPermisosMenu(user.role.toUpperCase().trim());
+              if (resPermisos.success) {
+                  setAllowedMenus(resPermisos.data);
+              } else {
+                  setAllowedMenus([]); 
+              }
+          } else {
+              setAllowedMenus([]);
           }
       };
-      fetchLogo();
-  }, []);
+      fetchData();
+  }, [user?.role]);
 
   const toggleMenu = (label: string) => {
     setOpenMenus(prev => ({ ...prev, [label]: !prev[label] }));
@@ -93,39 +112,28 @@ export function Sidebar({ user }: { user?: any }) {
     }, 
   ];
 
-  const allAvailableItems = user?.role === 'GERENTE GENERAL' 
-    ? [...menuItems, ...adminItems] 
-    : menuItems;
+  const allAvailableItems = [...menuItems, ...adminItems];
 
- const displayItems = allAvailableItems.filter(item => {
-    const rol = user?.role?.toUpperCase().trim() || "";
-    const isJefeRRHH = rol === "JEFE DE RRHH" || rol === "JEFE_RRHH";
+  // ✨ AQUÍ OCURRE LA MAGIA: Filtramos usando los datos de la BD
+  const displayItems = allAvailableItems.filter(item => {
+    // Si aún no cargan los permisos, no mostramos nada
+    if (!allowedMenus) return false; 
 
-    // ✨ REGLA 1: El Jefe de RRHH SOLO ve Dashboard y RRHH
-    if (isJefeRRHH) {
-      return item.label === "Dashboard" || item.label === "RRHH";
-    }
-
-    // Regla 2: Quiénes ven Ventas y RRHH (Para el resto de roles)
-    if (item.label === "Ventas & OC" || item.label === "RRHH") {
-      return rol === "GERENTE GENERAL" || 
-             rol === "ADMIN_SUCURSAL" || 
-             rol === "ADMINISTRADOR_ZONAL" || 
-             rol === "ADMINISTRADOR ZONAL";
-    }
-
-    // Regla 3: Bloquear "Reportes" para el Almacenero
-    if (item.label === "Reportes") {
-      return rol !== "ALMACENERO"; 
-    }
-
-    return true; // Mostrar lo demás a los que no cayeron en filtros anteriores
-  }).map(item => {
+    const itemLabel = item.label;
+    const itemHref = item.href || "";
     
-    // Logica para ocultar reportes globales al admin de sucursal
+    // Normalizamos 'Configuración' por si acaso (sin tilde) para que coincida con la BD
+    const labelToCheck = itemLabel === "Configuración" ? "Configuracion" : itemLabel;
+
+    // Verificamos si la ruta (/dashboard) o la etiqueta (Ventas & OC) están en la lista permitida
+    return allowedMenus.includes(itemHref) || allowedMenus.includes(labelToCheck);
+    
+  }).map(item => {
+    const rol = user?.role?.toUpperCase().trim() || "";
+
+    // Mantenemos las reglas internas para ocultar sub-menús específicos
     if (item.label === "Reportes" && item.subItems) {
-      const isPrivileged = user?.role === "GERENTE GENERAL" || user?.role === "CEO" || user?.role === "ADMINISTRADOR GENERAL";
-      
+      const isPrivileged = rol === "GERENTE GENERAL" || rol === "CEO" || rol === "ADMINISTRADOR GENERAL";
       if (!isPrivileged) {
         return {
           ...item,
@@ -136,6 +144,16 @@ export function Sidebar({ user }: { user?: any }) {
         };
       }
     }
+
+    if (item.label === "Inventario" && item.subItems) {
+      if (rol === "ALMACENERO" || rol === "ADMIN_SUCURSAL") {
+        return {
+          ...item,
+          subItems: item.subItems.filter(sub => sub.label !== "Configurar Recetas")
+        };
+      }
+    }
+
     return item;
   });
 
@@ -144,6 +162,18 @@ export function Sidebar({ user }: { user?: any }) {
     const matchChild = item.subItems ? item.subItems.some(sub => sub.label.toLowerCase().includes(searchTerm.toLowerCase())) : false;
     return matchParent || matchChild;
   });
+
+  // ✨ PANTALLA DE CARGA MIENTRAS BUSCA LOS PERMISOS
+  if (allowedMenus === null) {
+      return (
+          <aside className="w-64 bg-white border-r border-gray-200 hidden md:flex flex-col h-screen fixed left-0 top-0 z-10 justify-center items-center">
+              <div className="flex flex-col items-center gap-3">
+                  <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                  <span className="text-sm text-gray-500 font-medium animate-pulse">Cargando permisos...</span>
+              </div>
+          </aside>
+      );
+  }
 
   return (
     <aside className="w-64 bg-white border-r border-gray-200 hidden md:flex flex-col h-screen fixed left-0 top-0 z-10">
@@ -179,7 +209,7 @@ export function Sidebar({ user }: { user?: any }) {
       <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1">
         {filteredItems.length === 0 ? (
            <div className="px-3 py-4 text-center">
-             <p className="text-sm text-gray-400">No se encontraron opciones</p>
+             <p className="text-sm text-gray-400">No tienes módulos asignados.</p>
            </div>
         ) : (
           filteredItems.map((item) => {

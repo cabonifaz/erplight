@@ -201,29 +201,37 @@ export async function obtenerSucursales() {
     const session = await auth();
     if (!session?.user) return { success: false, data: [], defaultBranchId: 1 };
 
-    const userId = session.user.id;
-    const role = session.user.role?.toUpperCase() || "";
+    const sessionUser = session.user as any;
+    
+    // ✨ 1. Extraemos el ID del usuario de forma segura (Igual que en el Dashboard)
+    const userId = sessionUser.id || sessionUser.sub || sessionUser.userId || sessionUser.id_usuario;
+    const role = sessionUser.role?.toUpperCase().trim() || "";
 
     const connection = await pool.getConnection();
     try {
-        const [rows]: any = await connection.query("CALL sp_rrhh_obtener_sucursales()");
-        const todasLasSucursales = rows[0] || [];
-
         const PRIVILEGED_ROLES = ["GERENTE GENERAL", "ADMINISTRADOR GENERAL", "JEFE DE RRHH"];
         
-        if (PRIVILEGED_ROLES.includes(role.replace(/_/g, ' '))) {
-            return { success: true, data: todasLasSucursales, defaultBranchId: 1 };
+        // ✨ 2. Si es Gerente o Jefe, buscamos TODAS las sucursales directamente
+        if (PRIVILEGED_ROLES.includes(role)) {
+            const [todasLasSucursales]: any = await connection.query("SELECT id, name FROM branches");
+            return { success: true, data: todasLasSucursales || [], defaultBranchId: 1 };
         }
 
-        // ✨ Cero SQL Crudo: Llamada al SP de seguridad
-        const [userBranchesResult]: any = await connection.query("CALL sp_obtener_sucursales_usuario(?)", [userId]);
-        const userBranches = userBranchesResult[0];
+        // ✨ 3. Si es ADMIN_SUCURSAL, buscamos su sede real cruzando las tablas (Sin usar SPs)
+        const [userBranches]: any = await connection.query(
+            `SELECT DISTINCT b.id, b.name 
+             FROM user_branches ub 
+             JOIN branches b ON ub.branch_id = b.id 
+             WHERE ub.user_id = ?`, 
+            [userId]
+        );
 
+        // Si encontramos su sucursal, se la enviamos al frontend
         if (userBranches && userBranches.length > 0) {
             return { 
                 success: true, 
                 data: userBranches, 
-                defaultBranchId: userBranches[0].id 
+                defaultBranchId: userBranches[0].id // Forzamos a que cargue esta sede al iniciar
             };
         }
 

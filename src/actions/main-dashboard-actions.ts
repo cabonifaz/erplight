@@ -13,15 +13,6 @@ export async function getDashboardInteligente(sucursalSeleccionada?: string) {
     // Obtenemos el ID del usuario (NextAuth suele guardarlo en .id, .sub o .userId)
     const userId = sessionUser.id || sessionUser.sub || sessionUser.userId || sessionUser.id_usuario;
 
-    // Búsqueda de Sede Principal por defecto
-    let branchId = sessionUser.branch_id || sessionUser.branchId || sessionUser.sede_id || sessionUser.id_sucursal;
-    
-    if (!branchId) {
-        branchId = 1; // Default
-    } else {
-        branchId = parseInt(branchId);
-    }
-
     // Generación de fecha
     const formatter = new Intl.DateTimeFormat('es-PE', {
         timeZone: 'America/Lima',
@@ -36,6 +27,19 @@ export async function getDashboardInteligente(sucursalSeleccionada?: string) {
     const connection = await pool.getConnection();
     
     try {
+        // ✨ CORRECCIÓN: Buscamos la sucursal REAL en la Base de Datos
+        let branchId = 1; // Lima por defecto (ID 1)
+        
+        const [userBranchRows]: any = await connection.query(
+            "SELECT branch_id FROM user_branches WHERE user_id = ? LIMIT 1", 
+            [userId]
+        );
+        
+        // Si el usuario tiene una sucursal asignada en la BD, sobreescribimos el '1'
+        if (userBranchRows && userBranchRows.length > 0) {
+            branchId = parseInt(userBranchRows[0].branch_id);
+        }
+
         if (role === 'ALMACENERO') {
             const [results]: any = await connection.query("CALL sp_dashboard_almacen(?)", [branchId]);
             return {
@@ -65,6 +69,7 @@ export async function getDashboardInteligente(sucursalSeleccionada?: string) {
                 turnosGlobales: results[1] || []
             };
         }
+        
         // ✨ BLOQUE DEL ZONAL CORREGIDO: Consulta en VIVO a tu tabla user_branches
         else if (role === 'ADMINISTRADOR_ZONAL' || role === 'ADMINISTRADOR ZONAL') {
             

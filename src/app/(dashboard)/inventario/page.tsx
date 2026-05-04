@@ -20,66 +20,60 @@ interface SearchParamsType {
 export default async function InventoryPage(props: {
     searchParams: Promise<SearchParamsType>;
 }) {
-    // 1. Next.js 15: Esperar params
     const searchParams = await props.searchParams;
     const session = await auth();
     
-    // Configuración de usuario y sucursal...
     const userRole = session?.user?.role?.toUpperCase() || "";
+    const userId = session?.user?.id;
+
     let userBranchId = 0;
-    if (session?.user?.email) {
+    if (userId) {
         try {
-            const query = `SELECT ub.branch_id FROM user_branches ub INNER JOIN users u ON ub.user_id = u.id WHERE u.email = ? LIMIT 1`;
-            const [rows]: any = await pool.query(query, [session.user.email]);
-            if (rows.length > 0) userBranchId = rows[0].branch_id;
+            // ✨ CERO SQL CRUDO: Usamos el SP para traer la sucursal segura
+            const [rows]: any = await pool.query("CALL sp_obtener_sucursal_principal_usuario(?)", [userId]);
+            if (rows[0] && rows[0].length > 0) userBranchId = rows[0][0].branch_id;
         } catch (error) { console.error(error); }
     }
 
-    // Listas auxiliares para los filtros desplegables
-    const [productsList]: any = await pool.query("SELECT id, name, code FROM products WHERE status = 1 ORDER BY name ASC");
+    // ✨ CERO SQL CRUDO: Usamos el SP de productos
+    const [productsResult]: any = await pool.query("CALL sp_listar_productos()");
+    const productsList = productsResult[0] || [];
     const branches = await getBranches();
 
-    // ✨ AQUÍ ESTÁ LA MAGIA Y LA SEGURIDAD
-    // Definimos quiénes son los VIP que pueden ver todo
+    // Roles VIP
     const PRIVILEGED_ROLES = ['GERENTE GENERAL', 'GERENTE DE LOGISTICA', 'ADMINISTRADOR GENERAL'];
     const isRestricted = !PRIVILEGED_ROLES.includes(userRole);
 
     let finalBranchId = null;
 
     if (isRestricted) {
-        // 🔒 REGLA DE ORO: Si es administrador de sucursal, FORZAMOS su ID.
-        // Así, aunque sea la primera carga y la URL esté vacía, buscará SU inventario.
-        // (Además evita que intenten hackear cambiando la URL manualmente).
+        // 🔒 Si es almacenero o admin sucursal, FORZAMOS su ID.
         finalBranchId = userBranchId;
     } else {
-        // 🌍 Si es VIP (Gerente), leemos la URL. Si no hay nada, asume null (todas).
+        // 🌍 Si es VIP, leemos la URL.
         finalBranchId = searchParams.branchId && searchParams.branchId !== "ALL" 
             ? Number(searchParams.branchId) 
             : null;
     }
 
-    // 2. CAPTURAMOS LOS DEMÁS FILTROS DE LA URL
     const search = searchParams.query || null;
     const min_stock = searchParams.minStock ? Number(searchParams.minStock) : null;
     const max_stock = searchParams.maxStock ? Number(searchParams.maxStock) : null;
     const updated_from = searchParams.dateFrom || null;
 
-    // 3. LLAMAMOS AL "CEREBRO" CON LA SUCURSAL SEGURA
+    // Llamamos al action con el branch seguro
     const stocks = await getInventoryStocks({
-        branch_id: finalBranchId, // <-- Pasamos nuestra variable protegida
+        branch_id: finalBranchId, 
         search,
         min_stock,
         max_stock,
         updated_from
     });
 
-    // Cálculos de KPI rápidos para el Header
     const criticalCount = stocks.filter((s: any) => s.stock_current <= (s.min_stock || 0)).length;
-    const expiringCount = 0; 
 
     return (
         <div className="p-6 space-y-6 max-w-[1400px] mx-auto">
-            {/* HEADER CON INDICADORES */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div className="flex flex-col gap-1">
                     <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
@@ -89,7 +83,6 @@ export default async function InventoryPage(props: {
                     <p className="text-gray-500 text-sm">Monitoreo de existencias y caducidad.</p>
                 </div>
                 
-                {/* TARJETAS DE ALERTA RÁPIDA */}
                 <div className="flex gap-3">
                     {criticalCount > 0 && (
                         <div className="flex items-center gap-2 px-4 py-2 bg-red-50 border border-red-200 rounded-lg text-red-700 shadow-sm animate-pulse">
@@ -111,12 +104,18 @@ export default async function InventoryPage(props: {
             />
 
             <div className="flex items-center gap-3 bg-white p-2 rounded-lg border shadow-sm w-fit">
-                <InventoryActionsButton 
-                    branches={branches} 
-                    userRole={userRole} 
-                    userBranchId={userBranchId} 
-                />
-                <div className="h-6 w-px bg-gray-200 mx-1"></div>
+                {/* ✨ BLOQUEO VISUAL: Ocultamos el botón al ALMACENERO */}
+                {userRole !== 'ALMACENERO' && (
+                    <>
+                        <InventoryActionsButton 
+                            branches={branches} 
+                            userRole={userRole} 
+                            userBranchId={userBranchId} 
+                        />
+                        <div className="h-6 w-px bg-gray-200 mx-1"></div>
+                    </>
+                )}
+                
                 <span className="text-xs text-gray-400 font-medium px-2">
                     Total: {stocks.length} items
                 </span>

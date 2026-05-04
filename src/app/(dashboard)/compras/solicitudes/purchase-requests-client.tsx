@@ -8,9 +8,7 @@ import { PurchaseRequestFilters } from "@/components/modules/compras/purchase-re
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-// ✨ Nuevos íconos corporativos agregados aquí
 import { ShoppingCart, Calendar, MapPin, User, FileText, MessageSquare, TrendingUp, BarChart3, Building2, AlertCircle, CheckCircle2, RefreshCw } from "lucide-react";
-
 
 const money = (amount: number, currency: string = 'PEN') => {
     return new Intl.NumberFormat('es-PE', { style: 'currency', currency: currency }).format(amount);
@@ -42,18 +40,27 @@ export default function PurchaseRequestsClient({
     initialRequests, 
     branches, 
     userRole, 
-    userBranchId 
+    userBranchId,
+    userId 
 }: { 
     initialRequests: any[], 
     branches: any[], 
     userRole: string, 
-    userBranchId?: number 
+    userBranchId?: number,
+    userId: number 
 }) {
     const [activeTab, setActiveTab] = useState('solicitudes');
     const [requests, setRequests] = useState(initialRequests);
 
-    // ✨ ESTADO CENTRALIZADO PARA LA SUCURSAL SELECCIONADA
-    const [selectedBranchId, setSelectedBranchId] = useState<number>(userBranchId || (branches && branches.length > 0 ? branches[0].id : 1));
+    // SEGURIDAD: Lógica de Sucursales Permitidas
+    const PRIVILEGED_ROLES = ["GERENTE GENERAL", "ADMINISTRADOR GENERAL", "LOGISTICA", "GERENTE DE LOGISTICA", "CEO"];
+    const isVIP = PRIVILEGED_ROLES.includes(userRole?.toUpperCase().trim());
+    
+    const sucursalesPermitidas = isVIP ? branches : branches.filter(b => b.id === userBranchId);
+
+    const [selectedBranchId, setSelectedBranchId] = useState<number>(
+        userBranchId || (sucursalesPermitidas.length > 0 ? sucursalesPermitidas[0].id : 1)
+    );
 
     const [datosPrediccion, setDatosPrediccion] = useState<any[]>([]);
     const [cargandoPrediccion, setCargandoPrediccion] = useState(false);
@@ -74,21 +81,20 @@ export default function PurchaseRequestsClient({
 
     const handleGenerarPrediccion = async () => {
         setCargandoPrediccion(true);
-        const res = await obtenerPrediccionCompras(selectedBranchId); // ✨ Ahora usa la sucursal del dropdown
+        const res = await obtenerPrediccionCompras(selectedBranchId); 
         if (res.success) setDatosPrediccion(res.data);
-        else alert("Error al analizar el inventario. Revisa la consola del servidor.");
+        else alert("Error al analizar el inventario.");
         setCargandoPrediccion(false);
     };
 
     const handleGenerarReporte = async () => {
         setCargandoReporte(true);
-        const res = await obtenerReporteCompras(selectedBranchId, reporteInicio, reporteFin); // ✨ Ahora usa la sucursal del dropdown
+        const res = await obtenerReporteCompras(selectedBranchId, reporteInicio, reporteFin); 
         if (res.success) setDatosReporte(res.data);
-        else alert("Error al generar el reporte. Revisa la consola del servidor.");
+        else alert("Error al generar el reporte.");
         setCargandoReporte(false);
     };
 
-    // ✨ COMPONENTE REUTILIZABLE: Selector de Sucursal
     const BranchSelector = () => (
         <div className="flex items-center gap-3 bg-white px-4 py-2 rounded-lg border border-gray-200 shadow-sm w-full sm:w-auto">
             <Building2 className="w-4 h-4 text-gray-500 shrink-0" />
@@ -98,7 +104,7 @@ export default function PurchaseRequestsClient({
                 value={selectedBranchId}
                 onChange={(e) => setSelectedBranchId(Number(e.target.value))}
             >
-                {branches.map(b => (
+                {sucursalesPermitidas.map(b => (
                     <option key={b.id} value={b.id}>{b.name}</option>
                 ))}
             </select>
@@ -122,10 +128,12 @@ export default function PurchaseRequestsClient({
         <div className="flex flex-wrap gap-1 bg-gray-100 p-1 rounded-lg">
             <button onClick={() => setActiveTab('solicitudes')} className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${activeTab === 'solicitudes' ? 'bg-white shadow text-slate-800' : 'text-gray-600 hover:text-gray-900'}`}>Bandeja de Requerimientos</button>
             <button onClick={() => setActiveTab('prediccion')} className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${activeTab === 'prediccion' ? 'bg-white shadow text-slate-800' : 'text-gray-600 hover:text-gray-900'}`}>Predicción de Stock</button>
-            <button onClick={() => setActiveTab('reportes')} className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${activeTab === 'reportes' ? 'bg-white shadow text-slate-800' : 'text-gray-600 hover:text-gray-900'}`}>Reporte Histórico</button>
+            
+            {userRole !== 'ALMACENERO' && (
+                <button onClick={() => setActiveTab('reportes')} className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${activeTab === 'reportes' ? 'bg-white shadow text-slate-800' : 'text-gray-600 hover:text-gray-900'}`}>Reporte Histórico</button>
+            )}
         </div>
 
-        {/* ==================== TAB 1: SOLICITUDES ==================== */}
         {activeTab === 'solicitudes' && (
             <>
                 <PurchaseRequestFilters 
@@ -162,67 +170,79 @@ export default function PurchaseRequestsClient({
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            {requests.map((req: any) => (
-                            <TableRow key={req.id} className="group transition-colors hover:bg-blue-50/40 border-b border-gray-50 last:border-0">
-                                <TableCell className="pl-6 font-mono text-xs font-medium text-gray-500">
-                                REQ-{req.id.toString().padStart(6, '0')}
-                                </TableCell>
-                                
-                                <TableCell>
-                                <div className="flex items-center gap-2 text-sm text-gray-600">
-                                    <Calendar className="w-3 h-3 text-gray-400" />
-                                    {formatDate(req.issue_date)}
-                                </div>
-                                </TableCell>
-                                
-                                <TableCell>
-                                <div className="flex flex-col gap-1">
-                                    <span className="font-semibold text-gray-800 text-xs flex items-center gap-1">
-                                        <MapPin className="w-3 h-3 text-blue-500" /> {req.branch_name}
-                                    </span>
-                                    <span className="text-xs text-gray-500 flex items-center gap-1 ml-4">
-                                        <User className="w-3 h-3" /> {req.requester_name}
-                                    </span>
-                                </div>
-                                </TableCell>
-                                
-                                <TableCell>
-                                <div className="flex flex-col gap-2">
-                                    <p className="text-sm text-gray-700 line-clamp-2 leading-snug" title={req.description}>
-                                        {req.description}
-                                    </p>
-                                    {req.is_direct_purchase === 1 && (
-                                        <span className="text-[10px] text-blue-700 font-bold bg-blue-50 px-2 py-0.5 rounded-full border border-blue-100 w-fit">
-                                            ⚡ COMPRA DIRECTA
-                                        </span>
-                                    )}
-                                    {req.approval_comment && (
-                                        <div className="flex gap-2 items-start p-2 rounded-md bg-yellow-50/80 border border-yellow-100 mt-1">
-                                            <MessageSquare className="w-3 h-3 text-yellow-600 mt-0.5 shrink-0" />
-                                            <div className="flex flex-col">
-                                                <span className="text-[10px] font-bold text-yellow-700 uppercase tracking-tight">Nota:</span>
-                                                <p className="text-xs text-gray-700 italic leading-relaxed">
-                                                    "{req.approval_comment}"
-                                                </p>
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-                                </TableCell>
-                                
-                                <TableCell className="text-right font-medium text-gray-900">
-                                {money(req.estimated_total, req.currency)}
-                                </TableCell>
-                                
-                                <TableCell className="text-center">
-                                <StatusBadge code={req.status_code} label={req.status_desc} />
-                                </TableCell>
+                            {requests.map((req: any) => {
+                                // SEGURIDAD: Comprobamos si puede editar
+                                const esPropietario = req.user_id === userId || req.requester_id === userId; 
+                                const puedeEditar = isVIP || esPropietario;
 
-                                <TableCell className="text-right pr-6">
-                                <PurchaseRequestActions request={req} userRole={userRole} />
-                                </TableCell>
-                            </TableRow>
-                            ))}
+                                return (
+                                    <TableRow key={req.id} className="group transition-colors hover:bg-blue-50/40 border-b border-gray-50 last:border-0">
+                                        <TableCell className="pl-6 font-mono text-xs font-medium text-gray-500">
+                                        REQ-{req.id.toString().padStart(6, '0')}
+                                        </TableCell>
+                                        
+                                        <TableCell>
+                                        <div className="flex items-center gap-2 text-sm text-gray-600">
+                                            <Calendar className="w-3 h-3 text-gray-400" />
+                                            {formatDate(req.issue_date)}
+                                        </div>
+                                        </TableCell>
+                                        
+                                        <TableCell>
+                                        <div className="flex flex-col gap-1">
+                                            <span className="font-semibold text-gray-800 text-xs flex items-center gap-1">
+                                                <MapPin className="w-3 h-3 text-blue-500" /> {req.branch_name}
+                                            </span>
+                                            <span className="text-xs text-gray-500 flex items-center gap-1 ml-4">
+                                                <User className="w-3 h-3" /> {req.requester_name}
+                                            </span>
+                                        </div>
+                                        </TableCell>
+                                        
+                                        <TableCell>
+                                        <div className="flex flex-col gap-2">
+                                            <p className="text-sm text-gray-700 line-clamp-2 leading-snug" title={req.description}>
+                                                {req.description}
+                                            </p>
+                                            {req.is_direct_purchase === 1 && (
+                                                <span className="text-[10px] text-blue-700 font-bold bg-blue-50 px-2 py-0.5 rounded-full border border-blue-100 w-fit">
+                                                    ⚡ COMPRA DIRECTA
+                                                </span>
+                                            )}
+                                            {req.approval_comment && (
+                                                <div className="flex gap-2 items-start p-2 rounded-md bg-yellow-50/80 border border-yellow-100 mt-1">
+                                                    <MessageSquare className="w-3 h-3 text-yellow-600 mt-0.5 shrink-0" />
+                                                    <div className="flex flex-col">
+                                                        <span className="text-[10px] font-bold text-yellow-700 uppercase tracking-tight">Nota:</span>
+                                                        <p className="text-xs text-gray-700 italic leading-relaxed">
+                                                            "{req.approval_comment}"
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                        </TableCell>
+                                        
+                                        <TableCell className="text-right font-medium text-gray-900">
+                                        {money(req.estimated_total, req.currency)}
+                                        </TableCell>
+                                        
+                                        <TableCell className="text-center">
+                                        <StatusBadge code={req.status_code} label={req.status_desc} />
+                                        </TableCell>
+
+                                        <TableCell className="text-right pr-6">
+                                        {/* ✨ ESTO SOLUCIONA TU ERROR ROJO AL COMBINARSE CON EL ARCHIVO DE ABAJO */}
+                                        <PurchaseRequestActions 
+                                            request={req} 
+                                            userRole={userRole} 
+                                            currentUserId={userId}
+                                            canEdit={puedeEditar}
+                                        />
+                                        </TableCell>
+                                    </TableRow>
+                                )
+                            })}
                             
                             {requests.length === 0 && (
                             <TableRow>
@@ -247,7 +267,6 @@ export default function PurchaseRequestsClient({
             </>
         )}
 
-        {/* ==================== TAB 2: PREDICCIÓN INTELIGENTE (REDISEÑADO) ==================== */}
         {activeTab === 'prediccion' && (
             <div className="space-y-6">
                 <div className="bg-slate-800 p-6 rounded-xl shadow-md text-white flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
@@ -325,8 +344,7 @@ export default function PurchaseRequestsClient({
             </div>
         )}
 
-        {/* ==================== TAB 3: REPORTES (REDISEÑADO) ==================== */}
-        {activeTab === 'reportes' && (
+        {activeTab === 'reportes' && userRole !== 'ALMACENERO' && (
             <div className="space-y-6">
                 <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center bg-slate-50 p-6 rounded-xl border border-slate-200 shadow-sm gap-6">
                     <div>

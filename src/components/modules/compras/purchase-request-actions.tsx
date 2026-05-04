@@ -16,22 +16,23 @@ import { MoreHorizontal, FileText, XCircle, Pencil, Eye } from "lucide-react";
 import { ApproveModal } from "./approve-modal";
 import { RequestFormSheet } from "./request-form-sheet";
 import { ViewRequestSheet } from "./view-request-sheet";
-import { RejectModal } from "./reject-modal"; // <--- IMPORTAR NUEVO MODAL
+import { RejectModal } from "./reject-modal"; 
 
 interface Props {
     request: any;
     userRole: string; 
+    currentUserId?: number; // ✨ Aceptamos el ID
+    canEdit?: boolean;      // ✨ Aceptamos el permiso
 }
 
-export function PurchaseRequestActions({ request, userRole }: Props) {
+export function PurchaseRequestActions({ request, userRole, currentUserId, canEdit }: Props) {
   const [showViewSheet, setShowViewSheet] = useState(false);
-  
-  // Nuevo estado para el modal de rechazo
   const [showRejectModal, setShowRejectModal] = useState(false);
 
-  // ✅ Cámbialo por esto:
-const canApprove = ['GERENTE GENERAL', 'GERENTE DE LOGISTICA', 'ADMIN_SUCURSAL'].includes(userRole);
-  const canEdit = request.status_code === 'PENDIENTE';
+  const canApprove = ['GERENTE GENERAL', 'GERENTE DE LOGISTICA', 'ADMIN_SUCURSAL', 'ADMINISTRADOR GENERAL', 'CEO'].includes(userRole.toUpperCase());
+  
+  // ✨ VALIDACIÓN: Solo puede editar si está PENDIENTE Y (es suyo o es un rol superior)
+  const showEditOption = canEdit && request.status_code === 'PENDIENTE';
 
   return (
     <>
@@ -58,8 +59,8 @@ const canApprove = ['GERENTE GENERAL', 'GERENTE DE LOGISTICA', 'ADMIN_SUCURSAL']
                 <Eye className="mr-2 h-4 w-4" /> Ver Detalle
             </DropdownMenuItem>
             
-            {/* EDITAR */}
-            {canEdit && (
+            {/* ✨ EDITAR: Aplicamos la lógica de bloqueo aquí */}
+            {showEditOption && (
                 <div onSelect={(e) => e.preventDefault()}>
                     <RequestFormSheet 
                         requestToEdit={request}
@@ -77,7 +78,7 @@ const canApprove = ['GERENTE GENERAL', 'GERENTE DE LOGISTICA', 'ADMIN_SUCURSAL']
                 <>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem 
-                        onClick={() => setShowRejectModal(true)} // Abre el modal
+                        onClick={() => setShowRejectModal(true)} 
                         className="text-red-600 focus:text-red-700 focus:bg-red-50 cursor-pointer"
                     >
                         <XCircle className="mr-2 h-4 w-4" /> Rechazar
@@ -96,7 +97,6 @@ const canApprove = ['GERENTE GENERAL', 'GERENTE DE LOGISTICA', 'ADMIN_SUCURSAL']
             onOpenChange={setShowViewSheet} 
         />
 
-        {/* MODAL DE RECHAZO */}
         <RejectModal 
             requestId={request.id}
             open={showRejectModal}

@@ -99,6 +99,7 @@ export async function registerManualAdjustment(formData: FormData) {
 }
 
 // --- OBTENER INVENTARIO PRINCIPAL CON FILTROS (VERSION SEGURA) ---
+// --- OBTENER INVENTARIO PRINCIPAL CON FILTROS (VERSION SEGURA Y CORREGIDA) ---
 export async function getInventoryStocks(filters: {
     branch_id?: number | null;
     search?: string | null;
@@ -111,28 +112,27 @@ export async function getInventoryStocks(filters: {
 
     try {
         const role = session.user.role?.toUpperCase() || "";
-        // @ts-ignore
-        const sessionBranchId = session.user.branch_id; 
-
-        // 2. Lógica de Blindaje:
         let targetBranchId = filters.branch_id || null;
 
-        // 🛡️ ACTUALIZADO: Agregamos ADMIN_SUCURSAL y ADMIN_SUC para que puedan ver su data
         const PRIVILEGED_ROLES = [
             'GERENTE GENERAL', 
             'GERENTE DE LOGISTICA', 
-            'ADMINISTRADOR GENERAL', 
-            'ADMIN_SUCURSAL', 
-            'ADMIN_SUC'
+            'ADMINISTRADOR GENERAL'
         ];
         
+        // Si no es un usuario VIP (Ej: Almacenero, Admin Sucursal)
         if (!PRIVILEGED_ROLES.includes(role)) {
-            // Si el rol es un usuario básico (cocinero, mesero, etc.)
-            if (!sessionBranchId) return []; 
-            targetBranchId = sessionBranchId; 
+            // ✨ Cero SQL Crudo: Extraemos su sucursal de la BD de forma segura
+            const [userBranch]: any = await pool.query("CALL sp_obtener_sucursal_principal_usuario(?)", [session.user.id]);
+            
+            if (userBranch[0] && userBranch[0].length > 0) {
+                targetBranchId = userBranch[0][0].branch_id; 
+            } else {
+                return []; // Si por algún motivo no tiene sucursal, devolvemos vacío
+            }
         }
 
-        // 3. Ejecutamos el SP
+        // Ejecutamos el SP
         const [rows]: any = await pool.query(
             "CALL sp_filtrar_inventario(?, ?, ?, ?, ?)",
             [
