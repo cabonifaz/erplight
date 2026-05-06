@@ -12,9 +12,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { LogOut, User, Settings, ShieldCheck, MapPin, Lock } from "lucide-react"; 
+import { LogOut, User, Settings, ShieldCheck, MapPin, Lock, BookOpen } from "lucide-react"; 
 import { signOut } from "next-auth/react";
-import { cambiarPasswordUsuario } from "@/actions/auth-actions"; // ✨ Importamos la función
+import { cambiarPasswordUsuario } from "@/actions/auth-actions";
 
 interface UserNavProps {
   user: {
@@ -27,7 +27,6 @@ interface UserNavProps {
 }
 
 export function UserNav({ user }: UserNavProps) {
-  // ✨ ESTADOS PARA EL MODAL DE CONTRASEÑA
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
   const [loadingPass, setLoadingPass] = useState(false);
   const [passwords, setPasswords] = useState({ actual: '', nueva: '', confirmar: '' });
@@ -36,7 +35,12 @@ export function UserNav({ user }: UserNavProps) {
     ? user.name.split(" ").map((n) => n[0]).join("").substring(0, 2).toUpperCase()
     : "U";
 
-  // ✨ FUNCIÓN PARA GUARDAR
+  // Normalizamos el rol una sola vez para usarlo en las validaciones
+  const normalizedRole = user.role?.trim().toUpperCase() || "";
+
+  // ✨ VALIDACIÓN: Verificar si el usuario es de RRHH
+  const isRRHH = normalizedRole.includes('RRHH') || normalizedRole.includes('RECURSOS HUMANOS');
+
   const handleCambiarPassword = async () => {
       if (!passwords.actual || !passwords.nueva || !passwords.confirmar) {
           return alert("Por favor, completa todos los campos.");
@@ -61,6 +65,22 @@ export function UserNav({ user }: UserNavProps) {
       setLoadingPass(false);
   };
 
+  const getManualPathByRole = () => {
+    if (normalizedRole.includes('GERENTE')) {
+      return '/manuals/MANUAL DE OPERACIONES GERENTE GENERAL.pdf';
+    }
+    if (normalizedRole.includes('ZONAL')) {
+      return '/manuals/MANUAL DE OPERACIONES ADMINISTRADOR ZONAL.pdf';
+    }
+    if (normalizedRole.includes('SUCURSAL') || normalizedRole.includes('TIENDA')) {
+      return '/manuals/MANUAL DE OPERACIONES ADMINISTRADOR SUCURSAL.pdf';
+    }
+    if (normalizedRole.includes('ALMACEN')) {
+      return '/manuals/MANUAL DE OPERACIONES ALMACENERO.pdf';
+    }
+    return '/manuals/MANUAL DE OPERACIONES GERENTE GENERAL.pdf'; 
+  };
+
   return (
     <>
       <DropdownMenu>
@@ -81,9 +101,7 @@ export function UserNav({ user }: UserNavProps) {
               <p className="text-sm font-medium leading-none">{user.name}</p>
               <p className="text-xs leading-none text-muted-foreground">{user.email}</p>
               
-              {/* Contenedor de etiquetas (Rol + Sucursal) */}
               <div className="flex flex-wrap gap-2 mt-2">
-                {/* Etiqueta ROL */}
                 {user.role && (
                   <span className="text-[10px] font-bold bg-blue-50 text-blue-700 px-2 py-0.5 rounded border border-blue-100 uppercase tracking-wide flex items-center gap-1">
                      <ShieldCheck className="w-3 h-3" />
@@ -91,7 +109,6 @@ export function UserNav({ user }: UserNavProps) {
                   </span>
                 )}
                 
-                {/* Etiqueta SUCURSAL */}
                 {user.branch_name && (
                   <span className="text-[10px] font-bold bg-gray-100 text-gray-700 px-2 py-0.5 rounded border border-gray-200 uppercase tracking-wide flex items-center gap-1">
                      <MapPin className="w-3 h-3" />
@@ -99,7 +116,6 @@ export function UserNav({ user }: UserNavProps) {
                   </span>
                 )}
               </div>
-
             </div>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
@@ -113,7 +129,22 @@ export function UserNav({ user }: UserNavProps) {
               <Settings className="mr-2 h-4 w-4" />
               <span>Configuración</span>
             </DropdownMenuItem>
-            {/* ✨ NUEVA OPCIÓN DE CONTRASEÑA */}
+            
+            {/* ✨ CONDICIONAL: Solo se muestra si NO es RRHH */}
+            {!isRRHH && (
+              <DropdownMenuItem asChild className="cursor-pointer text-indigo-600 focus:text-indigo-700 focus:bg-indigo-50">
+                <a 
+                  href={getManualPathByRole()} 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="w-full flex items-center"
+                >
+                  <BookOpen className="mr-2 h-4 w-4" />
+                  <span className="font-medium">Manual de Usuario</span>
+                </a>
+              </DropdownMenuItem>
+            )}
+
             <DropdownMenuItem 
                 className="cursor-pointer text-blue-600 focus:text-blue-700 focus:bg-blue-50"
                 onClick={() => setIsPasswordModalOpen(true)}
@@ -125,19 +156,19 @@ export function UserNav({ user }: UserNavProps) {
           
           <DropdownMenuSeparator />
           <DropdownMenuItem 
-              className="cursor-pointer text-red-600 focus:text-red-600"
+              className="cursor-pointer text-red-600 focus:text-red-600 focus:bg-red-50"
               onClick={() => signOut({ callbackUrl: "/login" })}
           >
             <LogOut className="mr-2 h-4 w-4" />
-            <span>Cerrar Sesión</span>
+            <span className="font-medium">Cerrar Sesión</span>
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
 
-      {/* ✨ MODAL DE CAMBIO DE CONTRASEÑA ✨ */}
+      {/* MODAL DE CAMBIO DE CONTRASEÑA */}
       {isPasswordModalOpen && (
-          <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4">
-              <div className="bg-white rounded-xl shadow-2xl max-w-sm w-full overflow-hidden">
+          <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 backdrop-blur-sm transition-opacity">
+              <div className="bg-white rounded-xl shadow-2xl max-w-sm w-full overflow-hidden animate-in fade-in zoom-in duration-200">
                   <div className="bg-blue-900 p-4 text-white flex justify-between items-center">
                       <h3 className="font-bold text-lg flex items-center gap-2">
                           <Lock className="w-5 h-5" /> Cambiar Contraseña
