@@ -76,9 +76,9 @@ export function ViewRequestSheet({ request, open, onOpenChange }: ViewRequestShe
     const userRole = session?.user?.role ? session.user.role.toUpperCase().trim() : "";
     const status = currentRequest?.status_code;
 
-    const PRIVILEGED = ['CEO', 'LOGISTICA', 'ADMINISTRADOR GENERAL', 'CONTADOR', 'ADMIN'];
-    const WAREHOUSE = ['ADMIN_SUC', 'ALMACEN', 'LOGISTICA', 'ADMINISTRADOR GENERAL', 'CEO'];
-    const ACCOUNTING = ['CEO', 'ADMINISTRADOR GENERAL', 'LOGISTICA', 'CONTADOR'];
+const PRIVILEGED = ['CEO', 'GERENTE DE LOGISTICA', 'ADMINISTRADOR GENERAL', 'CONTADOR', 'ADMIN', 'GERENTE GENERAL'];
+const WAREHOUSE = ['ADMIN_SUCURSAL', 'ALMACENERO', 'GERENTE DE LOGISTICA', 'ADMINISTRADOR GENERAL', 'CEO', 'GERENTE GENERAL'];
+const ACCOUNTING = ['CEO', 'ADMINISTRADOR GENERAL', 'GERENTE DE LOGISTICA', 'CONTADOR', 'GERENTE GENERAL'];
 
     let canUploadPayments = false;
     if (status === 'VALIDADA') canUploadPayments = false;
@@ -89,8 +89,8 @@ export function ViewRequestSheet({ request, open, onOpenChange }: ViewRequestShe
     const canReceiveGoods = WAREHOUSE.includes(userRole);
     const canValidatePurchase = ACCOUNTING.includes(userRole);
     
-    // Validación para APROBAR/RECHAZAR (Añade más roles si es necesario)
-    const canApprove = ['ADMINISTRADOR GENERAL', 'CEO'].includes(userRole);
+  // Y esta línea también (Línea 93 aprox):
+const canApprove = ['ADMINISTRADOR GENERAL', 'CEO', 'GERENTE GENERAL'].includes(userRole);
 
    const loadAllData = () => {
     if (request?.id) {

@@ -25,8 +25,8 @@ export default function NotificationBell() {
 
     useEffect(() => {
         const cargarNotificaciones = async () => {
-            const rolCrudo = (session?.user as any)?.role || 'GERENTE_GENERAL';
-            const rolUsuario = rolCrudo.toUpperCase().replace(' ', '_'); 
+            const rolCrudo = (session?.user as any)?.role || 'GERENTE GENERAL'; // ✨ Cambia el default a espacio
+const rolUsuario = rolCrudo.toUpperCase().trim(); // ✨ QUITAMOS el .replace(' ', '_')
             const branchId = (session?.user as any)?.branch_id || 1;
             const userId = (session?.user as any)?.id; 
             
@@ -47,7 +47,7 @@ export default function NotificationBell() {
             }
 
             // ✨ 2. CARGAMOS ALERTAS DE CONTRATOS (Solo para Gerencias)
-            const rolesAlertaContrato = ['GERENTE_GENERAL', 'GERENTE_DE_LOGISTICA'];
+            const rolesAlertaContrato = ['GERENTE GENERAL', 'GERENTE DE LOGISTICA', 'ADMINISTRADOR GENERAL'];
             if (rolesAlertaContrato.includes(rolUsuario)) {
                 const resContratos = await obtenerNotificacionesContratos();
                 if (resContratos.success && resContratos.data) {

@@ -101,15 +101,26 @@ export function ApproveModal({ requestId, requestDesc, onSuccess }: ApproveModal
                                             
                                             <div className="flex flex-col truncate">
                                                 <span className="text-sm font-medium text-gray-700 truncate">{q.file_name}</span>
-                                                <a 
-                                                    href={q.file_path} 
-                                                    target="_blank" 
-                                                    rel="noreferrer"
-                                                    className="text-[10px] text-blue-500 hover:underline flex items-center gap-1"
-                                                    onClick={(e) => e.stopPropagation()} // Para que no active el select al dar click en ver
+                                                
+                                                {/* ✨ BOTÓN CORREGIDO AQUÍ ✨ */}
+                                                <button 
+                                                    type="button"
+                                                    className="text-[10px] text-blue-500 hover:text-blue-700 hover:underline flex items-center gap-1 z-10 relative"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation(); // Evita que se seleccione la cotización
+                                                        
+                                                        // Buscamos la URL en ambas variables
+                                                        const url = (q as any).file_url || q.file_path;
+                                                        
+                                                        if (url) {
+                                                            window.open(url, '_blank'); // Abre la pestaña a la fuerza
+                                                        } else {
+                                                            toast.error("El archivo no tiene una ruta válida.");
+                                                        }
+                                                    }}
                                                 >
                                                     <Download className="w-3 h-3" /> Descargar/Ver
-                                                </a>
+                                                </button>
                                             </div>
                                         </div>
 
