@@ -18,6 +18,7 @@ export default function SalesUploadClient({ sucursales }: { sucursales: any[] })
   );
   
   const [isProcessing, setIsProcessing] = useState(false);
+  const [loadingText, setLoadingText] = useState("Procesando archivo..."); // ✨ Texto dinámico para la carga
   const [isValidated, setIsValidated] = useState(false);
   const [canSubmit, setCanSubmit] = useState(false);
   const [validationIssues, setValidationIssues] = useState<any[]>([]);
@@ -63,6 +64,7 @@ export default function SalesUploadClient({ sucursales }: { sucursales: any[] })
     if (fileData.length === 0) return;
     if (!selectedBranch) return alert("Por favor, selecciona una sucursal antes de validar.");
     
+    setLoadingText("Analizando filas y validando stock..."); // Cambiamos el texto
     setIsProcessing(true);
 
     const cleanedData = fileData.map((row: any) => {
@@ -90,6 +92,7 @@ export default function SalesUploadClient({ sucursales }: { sucursales: any[] })
  const handleIngresar = async () => {
     if (fileData.length === 0 || !canSubmit || !selectedBranch) return;
     
+    setLoadingText("Registrando ventas y descontando inventario..."); // Cambiamos el texto
     setIsProcessing(true);
     
     const cleanedData = fileData.map((row: any) => {
@@ -115,7 +118,6 @@ export default function SalesUploadClient({ sucursales }: { sucursales: any[] })
     setIsProcessing(false);
   };
 
-  // Función para abrir el modal y cargar el historial
   const handleVerHistorial = async () => {
       setShowHistoryModal(true);
       setLoadingHistory(true);
@@ -126,7 +128,6 @@ export default function SalesUploadClient({ sucursales }: { sucursales: any[] })
       setLoadingHistory(false);
   };
 
-  // Lógica para filtrar la tabla en tiempo real
   const filteredHistorial = historialCargas.filter(log => 
       (log.sucursal || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
       (log.usuario || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -158,6 +159,24 @@ export default function SalesUploadClient({ sucursales }: { sucursales: any[] })
   return (
     <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 relative">
       
+      {/* ✨ PANTALLA DE CARGA (OVERLAY) ✨ */}
+      {isProcessing && (
+        <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-white/80 backdrop-blur-sm transition-all duration-300">
+          <div className="bg-white p-8 rounded-2xl shadow-2xl flex flex-col items-center max-w-sm w-full border border-blue-100">
+            {/* Animación de carga (Spinner bonito) */}
+            <div className="relative w-16 h-16 mb-4">
+              <div className="absolute inset-0 rounded-full border-4 border-blue-100"></div>
+              <div className="absolute inset-0 rounded-full border-4 border-blue-600 border-t-transparent animate-spin"></div>
+            </div>
+            <h3 className="text-xl font-bold text-gray-800 text-center mb-2">Por favor, espere</h3>
+            <p className="text-sm font-medium text-blue-600 text-center animate-pulse">{loadingText}</p>
+            <p className="text-xs text-gray-500 text-center mt-4">
+              No cierre ni recargue esta ventana mientras procesamos su solicitud.
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="flex justify-between items-center mb-6">
           <h2 className="text-xl font-bold text-gray-800">Módulo de Carga Diaria</h2>
           <button 
@@ -182,11 +201,9 @@ export default function SalesUploadClient({ sucursales }: { sucursales: any[] })
             setValidationIssues([]);
           }}
         >
-          {/* Si hay más de una sucursal, mostramos el texto de ayuda por defecto */}
           {sucursalesUnicas.length !== 1 && (
             <option value="" disabled>-- Selecciona a qué sucursal pertenecen estas ventas --</option>
           )}
-          {/* Renderizamos las opciones LIMPIAS */}
           {sucursalesUnicas.map(s => (
             <option key={s.id} value={s.id}>{s.name}</option>
           ))}
@@ -300,7 +317,7 @@ export default function SalesUploadClient({ sucursales }: { sucursales: any[] })
         </div>
       )}
 
-      {/* ✨ EL MODAL DEL HISTORIAL CON BUSCADOR Y DETALLES ✨ */}
+      {/* EL MODAL DEL HISTORIAL CON BUSCADOR Y DETALLES */}
       {showHistoryModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 backdrop-blur-sm">
               <div className="bg-white w-full max-w-5xl max-h-[85vh] rounded-xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">

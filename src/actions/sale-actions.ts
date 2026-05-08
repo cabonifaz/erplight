@@ -4,7 +4,50 @@ import { pool } from "@/lib/db";
 import { auth } from "@/auth";
 import { revalidatePath } from "next/cache";
 
+// ✨ NUEVA FUNCIÓN RESCATISTA PARA ENTENDER FECHAS LATINAS (DD/MM/YYYY) ✨
+function parseExcelDateHelper(fechaRaw: any): Date | null {
+    if (!fechaRaw) return null;
+    
+    // 1. Si Excel lo pasa como número de serie puro
+    if (typeof fechaRaw === 'number') {
+        const dias = fechaRaw - 25569;
+        return new Date((dias * 86400 * 1000) + (new Date().getTimezoneOffset() * 60000));
+    }
+
+    // 2. Si lo pasa como texto (ej: "26/05/2026" o "26-05-2026")
+    let dateStr = String(fechaRaw).trim();
+    let dateObj = new Date(dateStr);
+
+    // Si JS dice "Invalid Date" (porque espera MM/DD/YYYY), lo forzamos a DD/MM/YYYY
+    if (isNaN(dateObj.getTime())) {
+        const partsSpace = dateStr.split(' ');
+        const datePart = partsSpace[0];
+        const timePart = partsSpace[1] || "00:00:00";
+        
+        const parts = datePart.split(/[\/\-]/); // Divide por "/" o "-"
+        if (parts.length === 3) {
+            const day = parseInt(parts[0], 10);
+            const month = parseInt(parts[1], 10) - 1; // JS cuenta los meses de 0 a 11
+            let year = parseInt(parts[2], 10);
+            if (year < 100) year += 2000; // Convierte "26" a "2026"
+
+            dateObj = new Date(year, month, day);
+
+            // Rescata la hora si es que venía
+            const timeParts = timePart.split(':');
+            if (timeParts.length >= 2 && !isNaN(dateObj.getTime())) {
+                dateObj.setHours(parseInt(timeParts[0], 10));
+                dateObj.setMinutes(parseInt(timeParts[1], 10));
+                if (timeParts[2]) dateObj.setSeconds(parseInt(timeParts[2], 10));
+            }
+        }
+    }
+
+    return isNaN(dateObj.getTime()) ? null : dateObj;
+}
+
 // --- 1. FUNCIÓN DE VALIDACIÓN ---
+// --- 1. FUNCIÓN DE VALIDACIÓN CORREGIDA ---
 export async function validateExcelSales(payload: { data: any[], branchId: number }) {
     const session = await auth();
     if (!session?.user?.id) return { success: false, message: "No autorizado", issues: [], canProceed: false };
@@ -17,56 +60,30 @@ export async function validateExcelSales(payload: { data: any[], branchId: numbe
     const connection = await pool.getConnection();
 
     try {
+        // ... (Aquí se mantiene tu código intacto para validar fechas y duplicados) ...
         const fechasEnExcel = [...new Set(ventasData.map(fila => {
-            const fechaRaw = fila['Fecha'] || fila['fecha'];
-            if (!fechaRaw) return null;
-            
-            const dateObj = new Date(fechaRaw);
-            if (!isNaN(dateObj.getTime())) {
-                 const yyyy = dateObj.getFullYear();
-                 const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
-                 const dd = String(dateObj.getDate()).padStart(2, '0');
-                 return `${yyyy}-${mm}-${dd}`;
-            }
-            return null;
+            const dateKey = Object.keys(fila).find(k => ['fecha', 'fecha de emisión', 'fecha de emision', 'fecha venta', 'date', 'f. emision'].some(word => k.toLowerCase().trim() === word.toLowerCase()));
+            return parseExcelDateHelper(dateKey ? fila[dateKey] : null)?.toISOString().split('T')[0];
         }).filter(Boolean))];
 
-        const ticketsEnExcel = [...new Set(ventasData.map(fila => 
-            fila['Serie y correlativo'] || fila['Serie y Correlativo']
-        ).filter(Boolean))];
+        const ticketsEnExcel = [...new Set(ventasData.map(fila => fila['Serie y correlativo'] || fila['Serie y Correlativo']).filter(Boolean))];
 
-        // REGLA 1: VALIDACIÓN DE CIERRE DIARIO
         if (fechasEnExcel.length > 0) {
-            const fechasJSON = JSON.stringify(fechasEnExcel);
-            const [cierreResult]: any = await connection.query("CALL sp_verificar_cierres_diarios(?, ?)", [branchId, fechasJSON]);
-            const cierresChocando = cierreResult[0];
-
-            if (cierresChocando && cierresChocando.length > 0) {
-                issues.push({ 
-                    producto: "🚫 DÍA CERRADO", 
-                    mensaje: `El Excel contiene ventas de un día que ya tiene el CIERRE DIARIO ENVIADO. No se permiten cargar modificaciones ni ventas nuevas para fechas cerradas.`, 
-                    tipo: 'error' 
-                });
+            const [cierreResult]: any = await connection.query("CALL sp_verificar_cierres_diarios(?, ?)", [branchId, JSON.stringify(fechasEnExcel)]);
+            if (cierreResult[0] && cierreResult[0].length > 0) {
+                issues.push({ producto: "🚫 DÍA CERRADO", mensaje: `El Excel contiene ventas de un día que ya tiene el CIERRE DIARIO ENVIADO.`, tipo: 'error' });
                 return { success: true, issues, canProceed: false }; 
             }
         }
 
-        // REGLA 2: VALIDACIÓN DE DUPLICADOS
         if (ticketsEnExcel.length > 0) {
-            const ticketsJSON = JSON.stringify(ticketsEnExcel);
-            const [spResult]: any = await connection.query("CALL sp_verificar_tickets_duplicados(?, ?)", [branchId, ticketsJSON]);
-            const duplicados = spResult[0]; 
-
-            if (duplicados && duplicados.length > 0) {
-                const ejemplos = duplicados.map((d: any) => d.document_number).slice(0, 5).join(", ");
-                issues.push({ 
-                    producto: "⚠️ CORRECCIÓN DE VENTAS", 
-                    mensaje: `Se detectaron boletas existentes (Ej: ${ejemplos}...). Se realizará una corrección automática: el inventario anterior se devolverá y se reemplazarán con los datos de este nuevo Excel.`, 
-                    tipo: 'warning' 
-                });
+            const [spResult]: any = await connection.query("CALL sp_verificar_tickets_duplicados(?, ?)", [branchId, JSON.stringify(ticketsEnExcel)]);
+            if (spResult[0] && spResult[0].length > 0) {
+                issues.push({ producto: "⚠️ CORRECCIÓN", mensaje: `Se detectaron boletas existentes. Se reemplazarán con los datos de este Excel.`, tipo: 'warning' });
             }
         }
 
+        // 1. AGRUPAR PLATILLOS
         const ventasAgrupadas = new Map();
         const productosTotalesReales: Record<string, number> = {};
 
@@ -75,19 +92,18 @@ export async function validateExcelSales(payload: { data: any[], branchId: numbe
             const nombreProducto = fila['Producto / Descripción'] || fila['Producto'] || fila['producto'];
             const cantidad = Number(fila['Cantidad']) || 1;
 
-            if (!ventasAgrupadas.has(ticketId)) {
-                ventasAgrupadas.set(ticketId, new Set()); 
-            }
-
+            if (!ventasAgrupadas.has(ticketId)) ventasAgrupadas.set(ticketId, new Set()); 
             const productosEnEsteTicket = ventasAgrupadas.get(ticketId);
 
-            if (nombreProducto) {
-                if (!productosEnEsteTicket.has(nombreProducto)) {
-                    productosTotalesReales[nombreProducto] = (productosTotalesReales[nombreProducto] || 0) + cantidad;
-                    productosEnEsteTicket.add(nombreProducto);
-                }
+            if (nombreProducto && !productosEnEsteTicket.has(nombreProducto)) {
+                productosTotalesReales[nombreProducto] = (productosTotalesReales[nombreProducto] || 0) + cantidad;
+                productosEnEsteTicket.add(nombreProducto);
             }
         }
+
+        // ✨ 2. LA MAGIA AQUÍ: ACUMULADORES GLOBALES DE INSUMOS ✨
+        const insumosGlobalesNecesarios: Record<number, number> = {};
+        const productosDirectosNecesarios: Record<number, number> = {};
 
         for (const [nombreItem, cantidadRequerida] of Object.entries(productosTotalesReales)) {
             const [itemResult]: any = await connection.query("CALL sp_buscar_item_venta(?)", [nombreItem]);
@@ -102,43 +118,52 @@ export async function validateExcelSales(payload: { data: any[], branchId: numbe
             const itemId = itemRow.item_id;
 
             if (itemRow.tipo === 'MENU') {
-               const [recetaResult]: any = await connection.query("CALL sp_obtener_receta_menu(?)", [itemId]);
+                const [recetaResult]: any = await connection.query("CALL sp_obtener_receta_menu(?)", [itemId]);
                 const recetaRows = recetaResult[0];
 
                 if (!recetaRows || recetaRows.length === 0) {
                     issues.push({ producto: nombreItem, mensaje: "El menú no tiene receta configurada.", tipo: 'warning' });
                 } else {
+                    // SUMAMOS LOS INSUMOS A LA "BOLSA GIGANTE" EN LUGAR DE REVISARLOS AÚN
                     for (const ingrediente of recetaRows) {
                         const cantNecesaria = ingrediente.quantity * cantidadRequerida;
-                        const [stockResult]: any = await connection.query("CALL sp_obtener_stock_actual(?, ?)", [ingrediente.component_id, branchId]);
-                        const stockRow = stockResult[0];
-                        const stockActual = stockRow.length > 0 ? Number(Object.values(stockRow[0])[0]) : 0;
-                        
-                        if (stockActual < cantNecesaria) {
-                            issues.push({ 
-                                producto: nombreItem, 
-                                mensaje: `Stock insuficiente (ID Insumo: ${ingrediente.component_id}). Necesitas ${cantNecesaria}, pero tienes ${stockActual}.`, 
-                                tipo: 'error' 
-                            });
-                            canProceed = false;
-                        }
+                        insumosGlobalesNecesarios[ingrediente.component_id] = (insumosGlobalesNecesarios[ingrediente.component_id] || 0) + cantNecesaria;
                     }
                 }
             } else if (itemRow.tipo === 'PRODUCTO') {
-                const [stockResult]: any = await connection.query("CALL sp_obtener_stock_actual(?, ?)", [itemId, branchId]);
-                const stockRow = stockResult[0];
-                const stockActual = stockRow.length > 0 ? Number(Object.values(stockRow[0])[0]) : 0;
-                
-                if (stockActual < cantidadRequerida) {
-                    issues.push({ 
-                        producto: nombreItem, 
-                        mensaje: `Stock insuficiente del producto. Necesitas ${cantidadRequerida}, pero tienes ${stockActual}.`, 
-                        tipo: 'error' 
-                    });
-                    canProceed = false;
-                }
+                productosDirectosNecesarios[itemId] = (productosDirectosNecesarios[itemId] || 0) + cantidadRequerida;
             }
         }
+
+        // ✨ 3. REVISIÓN FINAL GLOBAL DE INSUMOS CONTRA STOCK ✨
+        for (const [componentId, totalNecesario] of Object.entries(insumosGlobalesNecesarios)) {
+            const [stockResult]: any = await connection.query("CALL sp_obtener_stock_actual(?, ?)", [componentId, branchId]);
+            const stockActual = stockResult[0]?.length > 0 ? Number(Object.values(stockResult[0][0])[0]) : 0;
+            
+            if (stockActual < totalNecesario) {
+                issues.push({ 
+                    producto: `Insumo ID: ${componentId}`, 
+                    mensaje: `Stock GLOBAL insuficiente. Necesitas ${totalNecesario} para todo el Excel, pero solo tienes ${stockActual}.`, 
+                    tipo: 'error' 
+                });
+                canProceed = false;
+            }
+        }
+
+        for (const [productId, totalNecesario] of Object.entries(productosDirectosNecesarios)) {
+            const [stockResult]: any = await connection.query("CALL sp_obtener_stock_actual(?, ?)", [productId, branchId]);
+            const stockActual = stockResult[0]?.length > 0 ? Number(Object.values(stockResult[0][0])[0]) : 0;
+            
+            if (stockActual < totalNecesario) {
+                issues.push({ 
+                    producto: `Producto ID: ${productId}`, 
+                    mensaje: `Stock GLOBAL insuficiente. Necesitas ${totalNecesario}, pero tienes ${stockActual}.`, 
+                    tipo: 'error' 
+                });
+                canProceed = false;
+            }
+        }
+
         return { success: true, issues, canProceed };
     } catch (error: any) {
         console.error("Error validando:", error);
@@ -188,27 +213,19 @@ export async function processExcelSales(payload: { data: any[], branchId: number
             const clientDoc = String(findValue(['cliente / ruc / dni']) || '');
 
             let fechaExcelFormateada = null;
-            const fechaRaw = findValue(['fecha']);
+            const fechaRaw = findValue(['fecha', 'fecha de emisión', 'fecha de emision', 'fecha venta', 'date', 'f. emision']);
 
-            if (fechaRaw) {
-                if (typeof fechaRaw === 'number') {
-                    const dias = fechaRaw - 25569;
-                    const fechaLocal = new Date((dias * 86400 * 1000) + (new Date().getTimezoneOffset() * 60000));
-                    fechaExcelFormateada = fechaLocal.toISOString().slice(0, 19).replace('T', ' ');
-                } 
-                else {
-                    const dateObj = new Date(fechaRaw);
-                    if (!isNaN(dateObj.getTime())) {
-                        const yyyy = dateObj.getFullYear();
-                        const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
-                        const dd = String(dateObj.getDate()).padStart(2, '0');
-                        const hh = String(dateObj.getHours()).padStart(2, '0');
-                        const min = String(dateObj.getMinutes()).padStart(2, '0');
-                        const ss = String(dateObj.getSeconds()).padStart(2, '0');
-                        
-                        fechaExcelFormateada = `${yyyy}-${mm}-${dd} ${hh}:${min}:${ss}`; 
-                    }
-                }
+            // Usamos nuestra función rescatista
+            const parsedDate = parseExcelDateHelper(fechaRaw);
+
+            if (parsedDate) {
+                const yyyy = parsedDate.getFullYear();
+                const mm = String(parsedDate.getMonth() + 1).padStart(2, '0');
+                const dd = String(parsedDate.getDate()).padStart(2, '0');
+                const hh = String(parsedDate.getHours()).padStart(2, '0');
+                const min = String(parsedDate.getMinutes()).padStart(2, '0');
+                const ss = String(parsedDate.getSeconds()).padStart(2, '0');
+                fechaExcelFormateada = `${yyyy}-${mm}-${dd} ${hh}:${min}:${ss}`; 
             }
 
             if (!fechaExcelFormateada) {
@@ -323,7 +340,6 @@ export async function getReporteVentas(filtros: {
             return { success: true, data: rows[0] || [] };
         } 
         else {
-            // ✨ CORRECCIÓN 1: Llamada limpia al SP
             const [sedesResult]: any = await connection.query("CALL sp_obtener_sedes_usuario(?)", [userId]);
             const sedesAsignadas = sedesResult[0];
 
@@ -374,7 +390,6 @@ export async function obtenerHistorialCargas() {
             return { success: true, data: todoElHistorial };
         } 
         
-        // ✨ CORRECCIÓN 2: Llamada limpia al SP
         const [branchRowsResult]: any = await connection.query("CALL sp_obtener_nombres_sedes_usuario(?)", [userId]);
         const branchRows = branchRowsResult[0];
         
@@ -414,7 +429,6 @@ export async function obtenerLimiteDiasReporte() {
     }
 }
 
-// --- 4. ANÁLISIS DE ABASTECIMIENTO (PREDICCIÓN DE STOCK) ---
 export async function analizarInventarioCompras(branchId: number) {
     const session = await auth();
     if (!session?.user?.id) return { success: false, message: "No autorizado", data: [] };
@@ -458,7 +472,6 @@ export async function getMenuPOS(requestedBranchId?: number) {
     }
 }
 
-// ✨ AÑADIMOS paymentMethod COMO SEXTO PARÁMETRO
 export async function processSalePOS(branchId: number, total: number, cart: any[], clientDocument: string = "", paymentMethod: string = "EFECTIVO") {
     const session = await auth();
     if (!session?.user) return { success: false, message: "No autorizado" };

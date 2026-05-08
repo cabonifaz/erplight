@@ -1001,17 +1001,13 @@ export async function createPurchaseOrderAction(data: any) {
 
 
 export async function getPurchaseOrders(requestId: number) {
-
   try {
-
+    // 1. Aquí busca la cabecera (Esto funciona perfecto ahora)
     const [rows]: any = await pool.query("CALL sp_listar_ordenes_solicitud(?)", [requestId]);
-
-    if (!rows[0] || rows[0].length === 0) return [];
-
-   
-
+    
+    // ...
     const ordersList = await Promise.all(rows[0].map(async (orden: any) => {
-
+        // 2. 🚨 ¡AQUÍ ESTÁ EL ERROR OCULTO! 🚨
         const [items]: any = await pool.query("CALL sp_listar_detalles_orden(?)", [orden.id]);
 
         return {
