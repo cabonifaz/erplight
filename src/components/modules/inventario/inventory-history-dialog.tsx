@@ -197,18 +197,41 @@ export function InventoryHistoryDialog({
                                             const isIngreso = (mov.type === 'INGRESO') || (mov.concept === 'COMPRA');
                                             return (
                                                 <TableRow key={mov.id} className="hover:bg-gray-50/50 transition-colors">
-                                                    {/* FECHA */}
-                                                    <TableCell className="align-top">
-                                                        <div className="flex flex-col text-xs text-gray-600">
-                                                            <div className="flex items-center gap-1.5 font-medium">
-                                                                <Calendar className="w-3.5 h-3.5 text-gray-400" />
-                                                                {new Date(mov.created_at).toLocaleDateString()}
-                                                            </div>
-                                                            <span className="pl-5 text-[10px] text-gray-400">
-                                                                {new Date(mov.created_at).toLocaleTimeString()}
-                                                            </span>
-                                                        </div>
-                                                    </TableCell>
+                                                   {/* FECHA */}
+<TableCell className="align-top">
+    <div className="flex flex-col text-xs text-gray-600">
+        <div className="flex items-center gap-1.5 font-medium">
+            <Calendar className="w-3.5 h-3.5 text-gray-400" />
+            {(() => {
+                if (!mov.created_at) return "-";
+                
+                // 1. Ya es un objeto Date gracias a mysql2
+                let d = new Date(mov.created_at);
+                
+                // 2. ✨ EL INTERRUPTOR DE TIEMPO ✨
+                // Le restamos 5 horas matemáticamente para contrarrestar el reloj de Londres de MySQL
+                d = new Date(d.getTime() - (5 * 60 * 60 * 1000));
+                
+                return d.toLocaleDateString('es-PE');
+            })()}
+        </div>
+        <span className="pl-5 text-[10px] text-gray-400">
+            {(() => {
+                if (!mov.created_at) return "-";
+                
+                let d = new Date(mov.created_at);
+                // Restamos las 5 horas también para la hora exacta
+                d = new Date(d.getTime() - (5 * 60 * 60 * 1000));
+                
+                return d.toLocaleTimeString('es-PE', { 
+                    hour: '2-digit', 
+                    minute: '2-digit',
+                    hour12: true 
+                });
+            })()}
+        </span>
+    </div>
+</TableCell>
 
                                                     {/* TIPO */}
                                                     <TableCell className="align-top">

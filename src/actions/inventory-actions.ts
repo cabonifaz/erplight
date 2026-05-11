@@ -236,3 +236,37 @@ export async function procesarAjusteInventarioExcel(payload: { branchId: number,
         connection.release();
     }
 }
+
+// ✨ NUEVA ACCIÓN: TRASLADO ENTRE SUCURSALES
+export async function transferirStockSucursal(data: {
+    fromBranch: number;
+    toBranch: number;
+    productId: number;
+    quantity: number;
+    reason: string;
+}) {
+    const session = await auth();
+    if (!session?.user) return { success: false, message: "No autorizado" };
+    
+    const sessionUser = session.user as any;
+    const userId = sessionUser.id || sessionUser.sub || sessionUser.userId || sessionUser.id_usuario;
+
+    const connection = await pool.getConnection();
+    try {
+        await connection.query(
+            "CALL sp_inventario_traslado_sucursal(?, ?, ?, ?, ?, ?)",
+            [data.fromBranch, data.toBranch, data.productId, data.quantity, userId, data.reason]
+        );
+        
+        return { success: true, message: "Traslado realizado con éxito. Los Kárdex han sido actualizados." };
+    } catch (error: any) {
+        console.error("Error en traslado:", error);
+        return { 
+            success: false, 
+            // Si el error viene de nuestro SIGNAL SQLSTATE, lo mostramos limpio
+            message: error.sqlMessage || "Error al realizar el traslado." 
+        };
+    } finally {
+        connection.release();
+    }
+}

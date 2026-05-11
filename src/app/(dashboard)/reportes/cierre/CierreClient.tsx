@@ -11,7 +11,15 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
 
 export default function CierreClient({ sucursales }: { sucursales: any[] }) {
     const [branchId, setBranchId] = useState(sucursales[0]?.id?.toString() || "");
-    const [fecha, setFecha] = useState(new Date().toISOString().split('T')[0]);
+    // ✨ FORZAMOS LA HORA A UTC-5 (PERÚ) PARA EVITAR VIAJES EN EL TIEMPO
+    const [fecha, setFecha] = useState(() => {
+        return new Intl.DateTimeFormat('en-CA', { 
+            timeZone: 'America/Lima', 
+            year: 'numeric', 
+            month: '2-digit', 
+            day: '2-digit' 
+        }).format(new Date());
+    });
     const [loading, setLoading] = useState(false);
     const [hasSearched, setHasSearched] = useState(false);
 

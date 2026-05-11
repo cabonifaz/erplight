@@ -10,7 +10,8 @@ import {
     guardarDisponibilidad, autogenerarHorarioSemana, publicarHorariosSemana, 
     eliminarHorarioEmpleado, obtenerReporteHoras,
     obtenerDetalleHorasEmpleado,
-    getContratosEmpleado, subirContratoEmpleado, eliminarContratoEmpleado 
+    getContratosEmpleado, subirContratoEmpleado, eliminarContratoEmpleado,
+    obtenerIncidencias, crearIncidencia, obtenerDocumentosGenerales, subirDocumentoGeneral, eliminarDocumentoGeneral 
 } from '@/actions/rrhh-actions';
 
 const getLunes = (d: Date) => {
@@ -31,8 +32,6 @@ export default function RRHHPage() {
     const [loading, setLoading] = useState(false);
     
     const [sucursales, setSucursales] = useState<any[]>([]);
-    
-    // Inicia en 0 para que muestre "Cargando..." hasta recibir la sede real
     const [sucursalActiva, setSucursalActiva] = useState<number>(0); 
     
     const [empleados, setEmpleados] = useState<any[]>([]);
@@ -40,8 +39,20 @@ export default function RRHHPage() {
     const [editingId, setEditingId] = useState<number | null>(null);
     const [listaDocumentos, setListaDocumentos] = useState<any[]>([]);
     const [listaCargos, setListaCargos] = useState<any[]>([]);
-    const [formData, setFormData] = useState({ nombres: '', apellidos: '', tipo_documento_id: 0, numero_documento: '', cargo_id: 0, salario_hora: '', fecha_nacimiento: '' });
     
+    // ✨ ACTUALIZADO: formData ahora incluye employment_type
+    const [formData, setFormData] = useState({ 
+        nombres: '', apellidos: '', tipo_documento_id: 0, numero_documento: '', 
+        cargo_id: 0, salario_hora: '', fecha_nacimiento: '', employment_type: 'FULL TIME' 
+    });
+    
+    // ✨ NUEVOS ESTADOS PARA EL PERFIL DEL EMPLEADO
+    const [perfilTab, setPerfilTab] = useState('general'); // 'general', 'docs', 'incidencias'
+    const [listaDocsGenerales, setListaDocsGenerales] = useState<any[]>([]);
+    const [listaIncidencias, setListaIncidencias] = useState<any[]>([]);
+    const [nuevaIncidencia, setNuevaIncidencia] = useState({ incident_type: 'VACACIONES', start_date: '', end_date: '', reason: '' });
+    const [nuevoDocNombre, setNuevoDocNombre] = useState('');
+
     const [horaActual, setHoraActual] = useState(new Date());
     const [empleadoMarcacion, setEmpleadoMarcacion] = useState('');
     const [estadoAsistencia, setEstadoAsistencia] = useState<'PENDIENTE_ENTRADA' | 'PENDIENTE_SALIDA' | 'COMPLETADO' | ''>('');
@@ -64,6 +75,7 @@ export default function RRHHPage() {
     const [contratosLista, setContratosLista] = useState<any[]>([]); 
     const [nuevoContratoFecha, setNuevoContratoFecha] = useState('');
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const docInputRef = useRef<HTMLInputElement>(null); // Referencia separada para documentos generales
     const [subiendoContrato, setSubiendoContrato] = useState(false); 
 
     const [isDetalleModalOpen, setIsDetalleModalOpen] = useState(false);
@@ -99,7 +111,6 @@ export default function RRHHPage() {
             const resSuc = await obtenerSucursales();
             if (resSuc.success) {
                 setSucursales(resSuc.data);
-                // El servidor manda el ID exacto que le corresponde
                 if (resSuc.defaultBranchId) {
                     setSucursalActiva(resSuc.defaultBranchId);
                 } else {
@@ -112,7 +123,6 @@ export default function RRHHPage() {
     }, [rolUsuario]);
 
     useEffect(() => {
-        // Solo carga datos si la sucursal ya no es 0
         if (sucursalActiva > 0) {
             cargarDatosSucursal();
             setEmpleadoMarcacion('');
@@ -152,14 +162,21 @@ export default function RRHHPage() {
         setLoading(false);
     };
 
+    // ✨ FUNCIONES DEL PERFIL ACTUALIZADAS
     const handleAbrirNuevo = () => {
         setEditingId(null);
-        setFormData({ nombres: '', apellidos: '', tipo_documento_id: listaDocumentos[0]?.id || 0, numero_documento: '', cargo_id: listaCargos[0]?.id || 0, salario_hora: '', fecha_nacimiento: '' });
+        setPerfilTab('general');
+        setFormData({ 
+            nombres: '', apellidos: '', tipo_documento_id: listaDocumentos[0]?.id || 0, 
+            numero_documento: '', cargo_id: listaCargos[0]?.id || 0, salario_hora: '', 
+            fecha_nacimiento: '', employment_type: 'FULL TIME' 
+        });
         setIsModalOpen(true);
     };
 
-    const handleAbrirEditar = (emp: any) => {
+    const handleAbrirEditar = async (emp: any) => {
         setEditingId(emp.id);
+        setPerfilTab('general');
         setFormData({ 
             nombres: emp.nombres || '', 
             apellidos: emp.apellidos || '', 
@@ -167,8 +184,15 @@ export default function RRHHPage() {
             numero_documento: emp.numero_documento || '', 
             cargo_id: emp.cargo_id || (listaCargos[0]?.id || 0), 
             salario_hora: emp.salario_hora || '',
-            fecha_nacimiento: emp.fecha_nacimiento ? new Date(emp.fecha_nacimiento).toISOString().split('T')[0] : '' 
+            fecha_nacimiento: emp.fecha_nacimiento ? new Date(emp.fecha_nacimiento).toISOString().split('T')[0] : '',
+            employment_type: emp.employment_type || 'FULL TIME'
         });
+        
+        // Cargamos la data de las otras pestañas
+        const [resDocs, resInc] = await Promise.all([obtenerDocumentosGenerales(emp.id), obtenerIncidencias(emp.id)]);
+        setListaDocsGenerales(resDocs.data || []);
+        setListaIncidencias(resInc.data || []);
+        
         setIsModalOpen(true);
     };
 
@@ -442,7 +466,7 @@ export default function RRHHPage() {
                             <div className="overflow-x-auto border border-gray-200 rounded-lg">
                                 <table className="min-w-full text-left text-sm whitespace-nowrap">
                                     <thead className="bg-gray-50 border-b border-gray-200">
-                                        <tr><th className="p-3">Nombre</th><th className="p-3">Doc</th><th className="p-3">Cargo</th><th className="p-3 text-center">Acciones</th></tr>
+                                        <tr><th className="p-3">Nombre</th><th className="p-3">Doc</th><th className="p-3">Cargo y Modalidad</th><th className="p-3 text-center">Acciones</th></tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-200">
                                         {empleados.length === 0 ? (
@@ -459,12 +483,21 @@ export default function RRHHPage() {
                                                         )}
                                                     </td>
                                                     <td className="p-3 text-gray-600">{emp.numero_documento}</td>
-                                                    <td className="p-3"><span className="bg-blue-50 text-blue-700 px-2 py-1 rounded-md text-xs font-semibold">{emp.cargo}</span></td>
+                                                    <td className="p-3">
+                                                        <div className="flex flex-col gap-1 items-start">
+                                                            <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded-md text-xs font-semibold border border-blue-100">{emp.cargo}</span>
+                                                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${emp.employment_type === 'PART TIME' ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>
+                                                                {emp.employment_type || 'FULL TIME'}
+                                                            </span>
+                                                        </div>
+                                                    </td>
                                                     <td className="p-3 text-center">
                                                         <div className="flex justify-center gap-3">
-                                                            <button onClick={() => handleAbrirEditar(emp)} className="text-blue-600 hover:text-blue-800 font-medium">Editar</button>
+                                                            <button onClick={() => handleAbrirEditar(emp)} className="flex items-center gap-1 text-blue-600 hover:text-blue-800 font-bold bg-blue-50 px-3 py-1.5 rounded-lg transition-colors">
+                                                                👤 Perfil
+                                                            </button>
                                                             <span className="text-gray-300">|</span>
-                                                            <button onClick={() => handleAbrirDisponibilidad(emp)} className="text-orange-600 hover:text-orange-800 font-medium">⏳ Disponibilidad</button>
+                                                            <button onClick={() => handleAbrirDisponibilidad(emp)} className="text-orange-600 hover:text-orange-800 font-medium">⏳ Disp.</button>
                                                             <span className="text-gray-300">|</span>
                                                             <button onClick={() => handleAbrirContratos(emp)} className="text-purple-600 hover:text-purple-800 font-medium">📄 Contratos</button>
                                                         </div>
@@ -650,85 +683,232 @@ export default function RRHHPage() {
                 )}
             </div>
 
+            {/* ✨ EL NUEVO MEGA-MODAL DEL PERFIL ✨ */}
             {isModalOpen && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]">
-                    <div className="bg-white p-6 rounded-lg shadow-2xl w-full max-w-lg">
-                        <h3 className="text-2xl font-bold mb-6 text-gray-800 border-b pb-2">
-                            {editingId ? 'Editar Empleado' : 'Registrar Nuevo Empleado'}
-                        </h3>
-                        <div className="space-y-4">
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm font-bold text-gray-700 mb-1">Nombres</label>
-                                    <input type="text" className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500" value={formData.nombres} onChange={e => setFormData({...formData, nombres: e.target.value})} />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-bold text-gray-700 mb-1">Apellidos</label>
-                                    <input type="text" className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500" value={formData.apellidos} onChange={e => setFormData({...formData, apellidos: e.target.value})} />
-                                </div>
+                <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[60] p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
+                        
+                        {/* Cabecera del Perfil */}
+                        <div className="bg-slate-900 p-6 text-white flex justify-between items-end">
+                            <div>
+                                <h3 className="text-2xl font-black">{editingId ? `${formData.nombres} ${formData.apellidos}` : 'Registrar Nuevo Personal'}</h3>
+                                {editingId && <p className="text-slate-400 font-medium mt-1">{formData.numero_documento} | {formData.employment_type}</p>}
                             </div>
-                            
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm font-bold text-gray-700 mb-1">Tipo de Doc.</label>
-                                    <select 
-                                        className="w-full p-2 pr-8 truncate border border-gray-300 rounded-md bg-white focus:ring-2 focus:ring-blue-500" 
-                                        value={formData.tipo_documento_id} 
-                                        onChange={e => setFormData({...formData, tipo_documento_id: Number(e.target.value)})}
-                                    >
-                                        <option value={0} disabled>Seleccione...</option>
-                                        {listaDocumentos.map(doc => <option key={doc.id} value={doc.id}>{doc.description}</option>)}
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-bold text-gray-700 mb-1">Numero de Doc.</label>
-                                    <input type="text" className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500" value={formData.numero_documento} onChange={e => setFormData({...formData, numero_documento: e.target.value})} />
-                                </div>
-                            </div>
-                            
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm font-bold text-gray-700 mb-1">Cargo</label>
-                                    <select className="w-full p-2 border border-gray-300 rounded-md bg-white focus:ring-2 focus:ring-blue-500" value={formData.cargo_id} onChange={e => setFormData({...formData, cargo_id: Number(e.target.value)})}>
-                                        <option value={0} disabled>Seleccione...</option>
-                                        {listaCargos.map(cargo => <option key={cargo.id} value={cargo.id}>{cargo.description}</option>)}
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-bold text-gray-700 mb-1">Salario Hora (S/)</label>
-                                    <input type="number" step="0.10" className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500" value={formData.salario_hora} onChange={e => setFormData({...formData, salario_hora: e.target.value})} />
-                                </div>
-                            </div>
+                            <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-white text-3xl font-light">&times;</button>
+                        </div>
 
-                            <div className="mt-2">
-                                <label className="block text-sm font-bold text-gray-700 mb-1">Fecha de Nacimiento</label>
-                                <input 
-                                    type="date" 
-                                    className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500" 
-                                    value={formData.fecha_nacimiento} 
-                                    onChange={e => setFormData({...formData, fecha_nacimiento: e.target.value})} 
-                                />
+                        {/* Pestañas (Solo si estamos editando) */}
+                        {editingId && (
+                            <div className="flex border-b bg-slate-50">
+                                <button onClick={() => setPerfilTab('general')} className={`flex-1 py-3 font-bold text-sm ${perfilTab === 'general' ? 'border-b-2 border-blue-600 text-blue-700 bg-white' : 'text-slate-500 hover:bg-slate-100'}`}>Datos Generales</button>
+                                <button onClick={() => setPerfilTab('docs')} className={`flex-1 py-3 font-bold text-sm ${perfilTab === 'docs' ? 'border-b-2 border-blue-600 text-blue-700 bg-white' : 'text-slate-500 hover:bg-slate-100'}`}>Documentos CV/DNI</button>
+                                <button onClick={() => setPerfilTab('incidencias')} className={`flex-1 py-3 font-bold text-sm ${perfilTab === 'incidencias' ? 'border-b-2 border-blue-600 text-blue-700 bg-white' : 'text-slate-500 hover:bg-slate-100'}`}>Licencias y Faltas</button>
                             </div>
+                        )}
 
-                            <div className="flex justify-end gap-3 mt-6 pt-4 border-t">
-                                <button onClick={() => setIsModalOpen(false)} className="px-5 py-2 text-gray-600 bg-gray-100 font-bold rounded-lg hover:bg-gray-200 transition-colors">
-                                    Cancelar
-                                </button>
-                                <button onClick={handleGuardarEmpleado} disabled={loading} className="px-5 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors">
-                                    {loading ? 'Guardando...' : (editingId ? 'Actualizar' : 'Guardar Empleado')}
-                                </button>
-                            </div>
+                        {/* CUERPO SCROLLABLE */}
+                        <div className="p-6 overflow-y-auto flex-1 bg-white">
+                            
+                            {/* PESTAÑA 1: DATOS GENERALES */}
+                            {perfilTab === 'general' && (
+                                <div className="space-y-4">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Nombres</label><input type="text" className="w-full p-2 border rounded-md focus:ring-2 focus:ring-blue-500" value={formData.nombres} onChange={e => setFormData({...formData, nombres: e.target.value})} /></div>
+                                        <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Apellidos</label><input type="text" className="w-full p-2 border rounded-md focus:ring-2 focus:ring-blue-500" value={formData.apellidos} onChange={e => setFormData({...formData, apellidos: e.target.value})} /></div>
+                                    </div>
+                                    
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                        <div>
+                                            <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Tipo Doc</label>
+                                            <select className="w-full p-2 border rounded-md focus:ring-2 focus:ring-blue-500 bg-white" value={formData.tipo_documento_id} onChange={e => setFormData({...formData, tipo_documento_id: Number(e.target.value)})}>
+                                                <option value={0} disabled>Seleccione...</option>
+                                                {listaDocumentos.map(doc => <option key={doc.id} value={doc.id}>{doc.description}</option>)}
+                                            </select>
+                                        </div>
+                                        <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Número</label><input type="text" className="w-full p-2 border rounded-md focus:ring-2 focus:ring-blue-500" value={formData.numero_documento} onChange={e => setFormData({...formData, numero_documento: e.target.value})} /></div>
+                                        <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">F. Nacimiento</label><input type="date" className="w-full p-2 border rounded-md focus:ring-2 focus:ring-blue-500" value={formData.fecha_nacimiento} onChange={e => setFormData({...formData, fecha_nacimiento: e.target.value})} /></div>
+                                    </div>
+                                    
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-blue-50 p-4 rounded-xl border border-blue-100">
+                                        <div>
+                                            <label className="block text-xs font-bold text-blue-800 uppercase mb-1">Modalidad</label>
+                                            <select className="w-full p-2 border border-blue-200 rounded-md font-bold text-blue-900 bg-white" value={formData.employment_type} onChange={e => setFormData({...formData, employment_type: e.target.value})}>
+                                                <option value="FULL TIME">FULL TIME</option>
+                                                <option value="PART TIME">PART TIME</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-bold text-blue-800 uppercase mb-1">Cargo</label>
+                                            <select className="w-full p-2 border border-blue-200 rounded-md font-bold text-blue-900 bg-white" value={formData.cargo_id} onChange={e => setFormData({...formData, cargo_id: Number(e.target.value)})}>
+                                                <option value={0} disabled>Seleccione...</option>
+                                                {listaCargos.map(c => <option key={c.id} value={c.id}>{c.description}</option>)}
+                                            </select>
+                                        </div>
+                                        <div><label className="block text-xs font-bold text-blue-800 uppercase mb-1">Salario Hora (S/)</label><input type="number" step="0.10" className="w-full p-2 border border-blue-200 rounded-md font-bold text-blue-900" value={formData.salario_hora} onChange={e => setFormData({...formData, salario_hora: e.target.value})} /></div>
+                                    </div>
+
+                                    <div className="flex justify-end pt-4 border-t mt-6">
+                                        <button onClick={handleGuardarEmpleado} disabled={loading} className="px-8 py-3 bg-blue-600 text-white font-black rounded-xl hover:bg-blue-700 shadow-md transition-all disabled:opacity-50">
+                                            {loading ? 'Procesando...' : (editingId ? 'Guardar Cambios' : 'Crear Empleado')}
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* PESTAÑA 2: DOCUMENTOS */}
+                            {perfilTab === 'docs' && editingId && (
+                                <div className="space-y-6">
+                                    <div className="bg-gray-50 p-4 rounded-xl border flex flex-col sm:flex-row gap-3 items-end">
+                                        <div className="flex-1 w-full">
+                                            <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Nombre (Ej: Copia DNI)</label>
+                                            <input type="text" className="w-full p-2 border rounded-md text-sm" value={nuevoDocNombre} onChange={e => setNuevoDocNombre(e.target.value)} />
+                                        </div>
+                                        <div className="flex-1 w-full">
+                                            <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Archivo (PDF o Imagen)</label>
+                                            <input type="file" ref={docInputRef} className="w-full text-sm p-1.5 border rounded-md bg-white" />
+                                        </div>
+                                        <button 
+                                            onClick={async () => {
+                                                if(!nuevoDocNombre || !docInputRef.current?.files?.[0]) return alert("Falta nombre o archivo");
+                                                const fd = new FormData(); 
+                                                fd.append('file', docInputRef.current.files[0]); 
+                                                fd.append('employeeId', String(editingId)); 
+                                                fd.append('documentName', nuevoDocNombre);
+                                                
+                                                setLoading(true); 
+                                                const res = await subirDocumentoGeneral(fd);
+                                                if(res.success) { 
+                                                    setNuevoDocNombre(''); 
+                                                    if(docInputRef.current) docInputRef.current.value=''; 
+                                                    const dr = await obtenerDocumentosGenerales(editingId); 
+                                                    setListaDocsGenerales(dr.data); 
+                                                } else {
+                                                    alert(res.message);
+                                                }
+                                                setLoading(false);
+                                            }} 
+                                            disabled={loading} 
+                                            className="bg-slate-800 text-white font-bold py-2 px-6 rounded-md hover:bg-slate-900 h-[38px] disabled:opacity-50"
+                                        >
+                                            {loading ? '...' : 'Subir Archivo'}
+                                        </button>
+                                    </div>
+                                    <div className="border rounded-lg overflow-hidden">
+                                        <table className="min-w-full text-sm text-left">
+                                            <thead className="bg-slate-100 border-b">
+                                                <tr><th className="p-3 font-bold text-gray-700">Documento</th><th className="p-3 font-bold text-gray-700">Tipo</th><th className="p-3 font-bold text-gray-700 text-center">Acción</th></tr>
+                                            </thead>
+                                            <tbody className="divide-y">
+                                                {listaDocsGenerales.map(d => (
+                                                    <tr key={d.id} className="hover:bg-slate-50">
+                                                        <td className="p-3 font-medium text-gray-800">{d.document_name}</td>
+                                                        <td className="p-3"><span className="bg-gray-200 text-gray-700 px-2 py-0.5 rounded text-xs font-bold">{d.document_type}</span></td>
+                                                        <td className="p-3 text-center flex justify-center gap-4">
+                                                            <a href={d.file_url} target="_blank" className="text-blue-600 font-bold hover:underline">Ver</a>
+                                                            <button 
+                                                                onClick={async () => { 
+                                                                    if(confirm("¿Seguro que deseas eliminar este documento?")) { 
+                                                                        await eliminarDocumentoGeneral(d.id, d.file_url); 
+                                                                        const dr = await obtenerDocumentosGenerales(editingId); 
+                                                                        setListaDocsGenerales(dr.data); 
+                                                                    } 
+                                                                }} 
+                                                                className="text-red-500 font-bold hover:underline"
+                                                            >
+                                                                Eliminar
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                                {listaDocsGenerales.length === 0 && <tr><td colSpan={3} className="p-8 text-center text-gray-400">Sin documentos registrados.</td></tr>}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* PESTAÑA 3: INCIDENCIAS Y FALTAS */}
+                            {perfilTab === 'incidencias' && editingId && (
+                                <div className="space-y-6">
+                                    <div className="bg-orange-50 p-4 rounded-xl border border-orange-100 flex flex-col sm:flex-row gap-3 items-end">
+                                        <div>
+                                            <label className="block text-xs font-bold text-orange-800 uppercase mb-1">Tipo</label>
+                                            <select className="p-2 border border-orange-200 bg-white rounded-md text-sm font-bold text-orange-900" value={nuevaIncidencia.incident_type} onChange={e => setNuevaIncidencia({...nuevaIncidencia, incident_type: e.target.value})}>
+                                                <option value="VACACIONES">🏖️ Vacaciones</option>
+                                                <option value="LICENCIA_CG">✅ Licencia Con Goce</option>
+                                                <option value="LICENCIA_SG">❌ Licencia Sin Goce</option>
+                                                <option value="AMONESTACION">⚠️ Amonestación</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-bold text-orange-800 uppercase mb-1">Desde</label>
+                                            <input type="date" className="p-2 border border-orange-200 bg-white rounded-md text-sm" value={nuevaIncidencia.start_date} onChange={e => setNuevaIncidencia({...nuevaIncidencia, start_date: e.target.value})} />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-bold text-orange-800 uppercase mb-1">Hasta (Opcional)</label>
+                                            <input type="date" className="p-2 border border-orange-200 bg-white rounded-md text-sm" value={nuevaIncidencia.end_date} onChange={e => setNuevaIncidencia({...nuevaIncidencia, end_date: e.target.value})} />
+                                        </div>
+                                        <div className="flex-1">
+                                            <label className="block text-xs font-bold text-orange-800 uppercase mb-1">Detalle / Motivo</label>
+                                            <input type="text" className="w-full p-2 border border-orange-200 bg-white rounded-md text-sm" placeholder="Ej: Viaje familiar" value={nuevaIncidencia.reason} onChange={e => setNuevaIncidencia({...nuevaIncidencia, reason: e.target.value})} />
+                                        </div>
+                                        <button 
+                                            onClick={async () => {
+                                                if(!nuevaIncidencia.start_date) return alert("Falta fecha de inicio");
+                                                setLoading(true); 
+                                                await crearIncidencia({...nuevaIncidencia, employee_id: editingId});
+                                                const dr = await obtenerIncidencias(editingId); 
+                                                setListaIncidencias(dr.data);
+                                                setNuevaIncidencia({ incident_type: 'VACACIONES', start_date: '', end_date: '', reason: '' }); 
+                                                setLoading(false);
+                                            }} 
+                                            disabled={loading} 
+                                            className="bg-orange-600 text-white font-bold py-2 px-6 rounded-md hover:bg-orange-700 h-[38px] disabled:opacity-50"
+                                        >
+                                            Registrar
+                                        </button>
+                                    </div>
+
+                                    <div className="border rounded-lg overflow-hidden">
+                                        <table className="min-w-full text-sm text-left">
+                                            <thead className="bg-slate-100 border-b">
+                                                <tr>
+                                                    <th className="p-3 font-bold text-gray-700">Tipo</th>
+                                                    <th className="p-3 font-bold text-gray-700">Fechas</th>
+                                                    <th className="p-3 font-bold text-gray-700">Motivo</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y">
+                                                {listaIncidencias.map(inc => (
+                                                    <tr key={inc.id} className="hover:bg-slate-50">
+                                                        <td className="p-3 font-black text-gray-700">{inc.incident_type.replace('_', ' ')}</td>
+                                                        <td className="p-3 text-gray-600 font-mono text-xs">
+                                                            {new Date(inc.start_date).toLocaleDateString('es-PE', {timeZone: 'UTC'})} 
+                                                            {inc.end_date && ` al ${new Date(inc.end_date).toLocaleDateString('es-PE', {timeZone: 'UTC'})}`}
+                                                        </td>
+                                                        <td className="p-3 italic text-gray-500">{inc.reason || '-'}</td>
+                                                    </tr>
+                                                ))}
+                                                {listaIncidencias.length === 0 && <tr><td colSpan={3} className="p-8 text-center text-gray-400">Sin registros de faltas o vacaciones.</td></tr>}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>
             )}
 
             {isDispModalOpen && (
-                <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[70]">
+                <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[70] p-4">
                     <div className="bg-white p-6 rounded-2xl shadow-2xl w-full max-w-lg">
-                        <div className="border-b pb-3 mb-4">
-                            <h3 className="text-xl font-bold text-gray-800">Reglas de Disponibilidad</h3>
-                            <p className="text-sm text-gray-500">Configura que dias y a que hora puede trabajar {dispEmp.nombre}.</p>
+                        <div className="border-b pb-3 mb-4 flex justify-between items-start">
+                            <div>
+                                <h3 className="text-xl font-bold text-gray-800">Reglas de Disponibilidad</h3>
+                                <p className="text-sm text-gray-500">Configura qué días y a qué hora puede trabajar {dispEmp.nombre}.</p>
+                            </div>
+                            <button onClick={() => setIsDispModalOpen(false)} className="text-gray-400 hover:text-gray-600 text-2xl font-bold">&times;</button>
                         </div>
                         <div className="space-y-3 max-h-[50vh] overflow-y-auto pr-2">
                             {dispData.map((dia) => (
@@ -746,15 +926,15 @@ export default function RRHHPage() {
                             ))}
                         </div>
                         <div className="flex justify-end gap-3 mt-6 pt-4 border-t">
-                            <button onClick={() => setIsDispModalOpen(false)} className="px-5 py-2 text-gray-600 bg-gray-100 font-bold rounded-xl hover:bg-gray-200">Cancelar</button>
-                            <button onClick={handleGuardarDisponibilidadTotal} disabled={loading} className="px-5 py-2 bg-orange-600 text-white font-bold rounded-xl hover:bg-orange-700 disabled:opacity-50">{loading ? 'Guardando...' : 'Guardar Reglas'}</button>
+                            <button onClick={() => setIsDispModalOpen(false)} className="px-5 py-2 text-gray-600 bg-gray-100 font-bold rounded-xl hover:bg-gray-200 transition-colors">Cancelar</button>
+                            <button onClick={handleGuardarDisponibilidadTotal} disabled={loading} className="px-5 py-2 bg-orange-600 text-white font-bold rounded-xl hover:bg-orange-700 disabled:opacity-50 transition-colors">{loading ? 'Guardando...' : 'Guardar Reglas'}</button>
                         </div>
                     </div>
                 </div>
             )}
 
             {modalTurno.isOpen && (
-                <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[80]">
+                <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[80] p-4">
                     <div className="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-sm">
                         <h3 className="text-2xl font-black text-gray-800 mb-1">Turno del {modalTurno.diaName}</h3>
                         <p className="text-base font-medium text-blue-600 mb-6">{modalTurno.empName}</p>
@@ -772,19 +952,19 @@ export default function RRHHPage() {
                             </div>
                         </div>
 
-                        <div className="flex justify-between items-center mt-2">
+                        <div className="flex justify-between items-center mt-2 pt-4 border-t">
                             <div>
                                 {modalTurno.existe && (
-                                    <button onClick={handleEliminarTurnoCelda} disabled={loading} className="px-4 py-3 bg-red-100 text-red-600 font-bold rounded-xl hover:bg-red-200 transition-colors disabled:opacity-50">
+                                    <button onClick={handleEliminarTurnoCelda} disabled={loading} className="px-4 py-2 bg-red-100 text-red-600 font-bold rounded-xl hover:bg-red-200 transition-colors disabled:opacity-50">
                                         Eliminar
                                     </button>
                                 )}
                             </div>
                             <div className="flex gap-3">
-                                <button onClick={() => setModalTurno({...modalTurno, isOpen: false})} className="px-5 py-3 text-gray-600 bg-gray-100 font-bold rounded-xl hover:bg-gray-200">
+                                <button onClick={() => setModalTurno({...modalTurno, isOpen: false})} className="px-5 py-2 text-gray-600 bg-gray-100 font-bold rounded-xl hover:bg-gray-200 transition-colors">
                                     Cancelar
                                 </button>
-                                <button onClick={() => handleGuardarTurnoCelda(false)} disabled={loading} className="px-5 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 disabled:opacity-50">
+                                <button onClick={() => handleGuardarTurnoCelda(false)} disabled={loading} className="px-5 py-2 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-colors">
                                     {loading ? '...' : 'Guardar'}
                                 </button>
                             </div>
@@ -794,7 +974,7 @@ export default function RRHHPage() {
             )}
 
             {isContratoModalOpen && (
-                <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[90]">
+                <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[90] p-4">
                     <div className="bg-white p-6 rounded-2xl shadow-2xl w-full max-w-2xl">
                         <div className="flex justify-between items-center border-b pb-3 mb-4">
                             <div>
@@ -822,11 +1002,11 @@ export default function RRHHPage() {
                                         type="file" 
                                         accept=".pdf" 
                                         ref={fileInputRef} 
-                                        className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-purple-100 file:text-purple-700 hover:file:bg-purple-200"
+                                        className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-purple-100 file:text-purple-700 hover:file:bg-purple-200 bg-white border"
                                     />
                                 </div>
                                 <button 
-                                    className="bg-purple-600 text-white font-bold py-2 px-6 rounded-md hover:bg-purple-700 text-sm h-[38px] disabled:opacity-50"
+                                    className="bg-purple-600 text-white font-bold py-2 px-6 rounded-md hover:bg-purple-700 text-sm h-[38px] disabled:opacity-50 transition-colors"
                                     onClick={handleSubirContrato}
                                     disabled={subiendoContrato}
                                 >
@@ -846,15 +1026,15 @@ export default function RRHHPage() {
                                 </thead>
                                 <tbody className="divide-y divide-gray-200">
                                     {contratosLista.length === 0 ? (
-                                        <tr><td colSpan={3} className="p-4 text-center text-gray-500">No hay contratos registrados.</td></tr>
+                                        <tr><td colSpan={3} className="p-8 text-center text-gray-500">No hay contratos registrados.</td></tr>
                                     ) : (
                                         contratosLista.map((c, i) => (
-                                            <tr key={c.id} className={i === 0 ? "bg-green-50" : "bg-white"}>
+                                            <tr key={c.id} className={i === 0 ? "bg-green-50" : "bg-white hover:bg-slate-50"}>
                                                 <td className="p-3 font-medium text-gray-800">
-                                                    {new Date(c.fecha_subida).toLocaleDateString()} 
+                                                    {new Date(c.fecha_subida).toLocaleDateString('es-PE', {timeZone: 'UTC'})} 
                                                     {i === 0 && <span className="ml-2 text-[10px] bg-green-200 text-green-800 px-2 py-0.5 rounded uppercase font-bold">Vigente</span>}
                                                 </td>
-                                                <td className="p-3 text-gray-600">{new Date(c.fecha_vencimiento).toLocaleDateString()}</td>
+                                                <td className="p-3 text-gray-600">{new Date(c.fecha_vencimiento).toLocaleDateString('es-PE', {timeZone: 'UTC'})}</td>
                                                 <td className="p-3 text-center flex items-center justify-center gap-3">
                                                     <a href={c.file_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 font-bold hover:underline">
                                                         👁️ Ver PDF
@@ -862,7 +1042,7 @@ export default function RRHHPage() {
                                                     <span className="text-gray-300">|</span>
                                                     <button 
                                                         onClick={() => handleEliminarContrato(c.id, c.file_url)}
-                                                        className="text-red-500 hover:text-red-700 font-bold text-lg"
+                                                        className="text-red-500 hover:text-red-700 font-bold text-lg transition-colors"
                                                         title="Eliminar contrato"
                                                     >
                                                         🗑️
@@ -884,7 +1064,7 @@ export default function RRHHPage() {
                         <div className="bg-blue-900 p-5 text-white">
                             <div className="flex justify-between items-center">
                                 <h3 className="text-xl font-bold">Desglose de Horas</h3>
-                                <button onClick={() => setIsDetalleModalOpen(false)} className="text-blue-200 hover:text-white text-2xl font-bold">&times;</button>
+                                <button onClick={() => setIsDetalleModalOpen(false)} className="text-blue-200 hover:text-white text-2xl font-bold transition-colors">&times;</button>
                             </div>
                             <p className="text-sm text-blue-200 mt-1 font-medium">{detalleEmpSeleccionado?.nombre_completo}</p>
                             <p className="text-xs text-blue-300 mt-1">Del {reporteInicio} al {reporteFin}</p>
@@ -908,7 +1088,7 @@ export default function RRHHPage() {
                                         {detalleHoras.map((dia, idx) => (
                                             <tr key={idx} className="hover:bg-blue-50 transition-colors">
                                                 <td className="p-3 font-medium text-gray-800 capitalize">
-                                                    {new Date(dia.fecha).toLocaleDateString('es-PE', { weekday: 'short', day: '2-digit', month: 'short' })}
+                                                    {new Date(dia.fecha).toLocaleDateString('es-PE', { timeZone: 'UTC', weekday: 'short', day: '2-digit', month: 'short' })}
                                                 </td>
                                                 <td className="p-3 text-center text-gray-600 font-mono text-xs bg-gray-50">
                                                     {dia.hora_inicio} - {dia.hora_fin}
@@ -922,7 +1102,7 @@ export default function RRHHPage() {
                                 </table>
                             )}
                         </div>
-                        <div className="bg-white p-4 border-t border-gray-200 flex justify-between items-center">
+                        <div className="bg-white p-4 border-t border-gray-200 flex justify-between items-center shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
                             <span className="text-sm font-bold text-gray-500">Total Auditado:</span>
                             <span className="text-xl font-black text-blue-800">
                                 {detalleHoras.reduce((acc, curr) => acc + Number(curr.horas_totales), 0).toFixed(2)} hrs

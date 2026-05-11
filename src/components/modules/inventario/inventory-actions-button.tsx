@@ -2,8 +2,9 @@
 
 import { useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { PlusCircle, UploadCloud, Loader2 } from "lucide-react";
+import { PlusCircle, UploadCloud, Loader2, ArrowRightLeft } from "lucide-react"; // ✨ Agregamos ArrowRightLeft
 import { ManualEntryDialog } from "./manual-entry-dialog";
+import { TransferStockDialog } from "./transfer-stock-dialog"; // ✨ Importamos el nuevo Modal
 import * as XLSX from "xlsx";
 import { procesarAjusteInventarioExcel } from "@/actions/inventory-actions";
 
@@ -11,19 +12,22 @@ interface InventoryActionsButtonProps {
     branches?: any[]; 
     userRole?: string;
     userBranchId?: number;
+    productos?: any[]; // ✨ Recibimos los productos desde la página principal
 }
 
 export function InventoryActionsButton({ 
     branches = [], 
     userRole = "", 
-    userBranchId 
+    userBranchId,
+    productos = [] // ✨ Inicializamos en vacío por seguridad
 }: InventoryActionsButtonProps) {
     
     const [open, setOpen] = useState(false);
+    const [isTransferModalOpen, setIsTransferModalOpen] = useState(false); // ✨ Estado para el modal de traslado
     const [isLoading, setIsLoading] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    // ✨ Estados para la justificación del Excel
+    // Estados para la justificación del Excel
     const [justificationModalOpen, setJustificationModalOpen] = useState(false);
     const [justificationText, setJustificationText] = useState("");
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -75,7 +79,6 @@ export function InventoryActionsButton({
                     return;
                 }
 
-                // ✨ Enviamos la justificación al Backend
                 const result = await procesarAjusteInventarioExcel({
                     branchId: Number(excelBranchId),
                     data: data,
@@ -127,7 +130,17 @@ export function InventoryActionsButton({
                     Ajuste Manual
                 </Button>
 
-                {/* BOTÓN 2: CARGA EXCEL */}
+                {/* ✨ BOTÓN 2: TRASLADO ENTRE SUCURSALES ✨ */}
+                <Button 
+                    type="button" 
+                    onClick={() => setIsTransferModalOpen(true)} 
+                    className="bg-orange-500 hover:bg-orange-600 text-white shadow-sm h-9 text-xs sm:text-sm"
+                >
+                    <ArrowRightLeft className="w-4 h-4 mr-2" />
+                    Trasladar Stock
+                </Button>
+
+                {/* BOTÓN 3: CARGA EXCEL */}
                 {puedeSubirExcel && (
                     <div className="flex items-center gap-2 bg-purple-50/50 p-1 pr-1.5 pl-2 rounded-lg border border-purple-100 shadow-sm">
                         <span className="text-xs font-semibold text-purple-800">Carga Masiva:</span>
@@ -166,7 +179,7 @@ export function InventoryActionsButton({
                 )}
             </div>
 
-            {/* ✨ MODAL DE JUSTIFICACIÓN DE AUDITORÍA ✨ */}
+            {/* MODAL DE JUSTIFICACIÓN DE AUDITORÍA */}
             {justificationModalOpen && (
                 <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4">
                     <div className="bg-white rounded-xl shadow-2xl max-w-md w-full overflow-hidden animate-in fade-in zoom-in-95 duration-200">
@@ -209,6 +222,16 @@ export function InventoryActionsButton({
                 branches={branches} 
                 userRole={userRole}
                 userBranchId={userBranchId || 0}
+            />
+
+            {/* ✨ MODAL DE TRASLADO DE INVENTARIO ✨ */}
+            <TransferStockDialog 
+                isOpen={isTransferModalOpen}
+                onOpenChange={setIsTransferModalOpen}
+                sucursalActualId={excelBranchId || userBranchId || 0} 
+                sucursales={branches} 
+                productos={productos} // Le pasamos la data real de la tabla
+                onSuccess={() => window.location.reload()} // Refresca la página al terminar
             />
         </>
     );

@@ -25,10 +25,11 @@ export async function crearEmpleado(data: any) {
     const connection = await pool.getConnection();
     try {
         const fechaNac = data.fecha_nacimiento ? data.fecha_nacimiento : null;
+        const modalidad = data.employment_type || 'FULL TIME';
         
         await connection.query(
-            "CALL sp_crear_empleado(?, ?, ?, ?, ?, ?, ?, ?)",
-            [data.branch_id, data.nombres, data.apellidos, data.tipo_documento_id, data.numero_documento, data.cargo_id, data.salario_hora, fechaNac]
+            "CALL sp_crear_empleado(?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [data.branch_id, data.nombres, data.apellidos, data.tipo_documento_id, data.numero_documento, data.cargo_id, data.salario_hora, fechaNac, modalidad]
         );
         return { success: true, message: "Empleado creado correctamente." };
     } catch (error: any) {
@@ -80,7 +81,7 @@ export async function obtenerHorariosSemana(branchId: number, fechaInicio: strin
     }
 }
 
-// 5. GUARDAR UN TURNO
+// 5. GUARDAR UN TURNO (Validando por SP)
 export async function guardarHorarioEmpleado(employeeId: number, fecha: string, horaInicio: string, horaFin: string, horasTotales: number, force: boolean = false, estado: number = 0) {
     const connection = await pool.getConnection();
     try {
@@ -89,17 +90,34 @@ export async function guardarHorarioEmpleado(employeeId: number, fecha: string, 
         let dayOfWeek = dateObj.getDay();
         dayOfWeek = dayOfWeek === 0 ? 7 : dayOfWeek;
 
-        const [dispRows]: any = await connection.query("CALL sp_rrhh_obtener_disponibilidad(?)", [employeeId]);
-        const disponibilidad = dispRows[0];
+        if (!force) {
+            // ✨ LLAMADA AL NUEVO SP RADAR
+            const [incRows]: any = await connection.query("CALL sp_rrhh_verificar_incidencia_fecha(?, ?)", [employeeId, fecha]);
+            const incidencias = incRows[0];
 
-        if (!force && disponibilidad && disponibilidad.length > 0) {
-            const reglaDelDia = disponibilidad.find((d: any) => d.dia_semana === dayOfWeek);
-            
-            if (!reglaDelDia) {
-                return { success: false, requiresConfirm: true, message: "⚠️ DÍA RESTRINGIDO: El empleado no está disponible este día. ¿Deseas asignarle el turno de todos modos?" };
+            if (incidencias && incidencias.length > 0) {
+                const inc = incidencias[0];
+                const tipo = inc.incident_type.replace('_', ' ');
+                return { 
+                    success: false, 
+                    requiresConfirm: true, 
+                    message: `⚠️ EMPLEADO AUSENTE: Tiene registrado '${tipo}' para esta fecha. ¿Deseas forzar la asignación del turno de todos modos?` 
+                };
             }
-            if (horaInicio < reglaDelDia.hora_inicio || horaFin > reglaDelDia.hora_fin) {
-                return { success: false, requiresConfirm: true, message: `⚠️ FUERA DE RANGO: Su horario base es de ${reglaDelDia.hora_inicio} a ${reglaDelDia.hora_fin}. ¿Deseas forzar este nuevo horario de todos modos?` };
+
+            // Validación de Disponibilidad normal
+            const [dispRows]: any = await connection.query("CALL sp_rrhh_obtener_disponibilidad(?)", [employeeId]);
+            const disponibilidad = dispRows[0];
+
+            if (disponibilidad && disponibilidad.length > 0) {
+                const reglaDelDia = disponibilidad.find((d: any) => d.dia_semana === dayOfWeek);
+                
+                if (!reglaDelDia) {
+                    return { success: false, requiresConfirm: true, message: "⚠️ DÍA RESTRINGIDO: El empleado no está disponible este día. ¿Deseas asignarle el turno de todos modos?" };
+                }
+                if (horaInicio < reglaDelDia.hora_inicio || horaFin > reglaDelDia.hora_fin) {
+                    return { success: false, requiresConfirm: true, message: `⚠️ FUERA DE RANGO: Su horario base es de ${reglaDelDia.hora_inicio} a ${reglaDelDia.hora_fin}. ¿Deseas forzar este nuevo horario de todos modos?` };
+                }
             }
         }
 
@@ -117,10 +135,11 @@ export async function editarEmpleado(data: any) {
     const connection = await pool.getConnection();
     try {
         const fechaNac = data.fecha_nacimiento ? data.fecha_nacimiento : null;
+        const modalidad = data.employment_type || 'FULL TIME';
 
         await connection.query(
-            "CALL sp_editar_empleado(?, ?, ?, ?, ?, ?, ?, ?)",
-            [data.id, data.nombres, data.apellidos, data.tipo_documento_id, data.numero_documento, data.cargo_id, data.salario_hora, fechaNac]
+            "CALL sp_editar_empleado(?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [data.id, data.nombres, data.apellidos, data.tipo_documento_id, data.numero_documento, data.cargo_id, data.salario_hora, fechaNac, modalidad]
         );
         return { success: true, message: "Empleado actualizado correctamente." };
     } catch (error: any) {
@@ -295,7 +314,7 @@ export async function guardarDisponibilidad(employeeId: number, diasDisponibles:
     }
 }
 
-// 16. AUTOGENERAR HORARIO SEMANAL
+// 16. AUTOGENERAR HORARIO SEMANAL (Validando por SP)
 export async function autogenerarHorarioSemana(branchId: number, fechaInicio: string, fechaFin: string) {
     const connection = await pool.getConnection();
     try {
@@ -313,6 +332,15 @@ export async function autogenerarHorarioSemana(branchId: number, fechaInicio: st
             const fechaStr = d.toISOString().split('T')[0];
 
             for (const emp of emps) {
+                // ✨ LLAMADA AL NUEVO SP RADAR AUTOMÁTICO
+                const [incRows]: any = await connection.query("CALL sp_rrhh_verificar_incidencia_fecha(?, ?)", [emp.id, fechaStr]);
+                const incidencias = incRows[0];
+
+                // Si hay registro de ausencia, lo ignoramos ese día
+                if (incidencias && incidencias.length > 0) {
+                    continue; 
+                }
+
                 const [dispRows]: any = await connection.query("CALL sp_rrhh_obtener_disponibilidad(?)", [emp.id]);
                 const disponibilidad = dispRows[0];
 
@@ -330,7 +358,7 @@ export async function autogenerarHorarioSemana(branchId: number, fechaInicio: st
             }
         }
         await connection.commit();
-        return { success: true, message: "Horarios autogenerados en Borrador." };
+        return { success: true, message: "Horarios autogenerados en Borrador omitiendo al personal de licencia." };
     } catch (error) {
         await connection.rollback();
         return { success: false, message: "Error al autogenerar." };
@@ -510,4 +538,85 @@ export async function obtenerDetalleHorasEmpleado(employeeId: number, startDate:
     } finally {
         connection.release();
     }
+}
+
+// ==========================================
+// ✨ NUEVO MÓDULO DE PERFIL: DOCS E INCIDENCIAS
+// ==========================================
+
+export async function obtenerIncidencias(employeeId: number) {
+    const connection = await pool.getConnection();
+    try {
+        const [rows]: any = await connection.query("SELECT * FROM employee_incidents WHERE employee_id = ? AND status = 1 ORDER BY start_date DESC", [employeeId]);
+        return { success: true, data: rows };
+    } catch (error) {
+        return { success: false, data: [] };
+    } finally { connection.release(); }
+}
+
+export async function crearIncidencia(data: any) {
+    const connection = await pool.getConnection();
+    try {
+        await connection.query(
+            "INSERT INTO employee_incidents (employee_id, incident_type, start_date, end_date, reason) VALUES (?, ?, ?, ?, ?)",
+            [data.employee_id, data.incident_type, data.start_date, data.end_date || null, data.reason]
+        );
+        return { success: true, message: "Registro guardado." };
+    } catch (error: any) {
+        return { success: false, message: error.message };
+    } finally { connection.release(); }
+}
+
+export async function obtenerDocumentosGenerales(employeeId: number) {
+    const connection = await pool.getConnection();
+    try {
+        const [rows]: any = await connection.query("SELECT * FROM employee_documents WHERE employee_id = ? ORDER BY upload_date DESC", [employeeId]);
+        return { success: true, data: rows };
+    } catch (error) {
+        return { success: false, data: [] };
+    } finally { connection.release(); }
+}
+
+export async function subirDocumentoGeneral(formData: FormData) {
+    const file = formData.get('file') as File;
+    const employeeId = Number(formData.get('employeeId'));
+    const documentName = formData.get('documentName') as string;
+
+    if (!file || !employeeId || !documentName) return { success: false, message: "Faltan datos requeridos." };
+
+    const connection = await pool.getConnection();
+    try {
+        const bytes = await file.arrayBuffer();
+        const buffer = Buffer.from(bytes);
+        // Generamos un nombre seguro para el archivo
+        const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+        const filename = `doc_${employeeId}_${Date.now()}_${safeName}`;
+        
+        // Guardamos en la misma carpeta de contratos por facilidad
+        const uploadDir = path.join(process.cwd(), 'public', 'contratos'); 
+        
+        try { await mkdir(uploadDir, { recursive: true }); } catch (e) {}
+        await writeFile(path.join(uploadDir, filename), buffer);
+        
+        const fileUrl = `/contratos/${filename}`;
+        
+        await connection.query(
+            "INSERT INTO employee_documents (employee_id, document_name, document_type, file_url) VALUES (?, ?, ?, ?)", 
+            [employeeId, documentName, file.type.includes('pdf') ? 'PDF' : 'IMAGEN', fileUrl]
+        );
+        return { success: true, message: "Documento guardado exitosamente." };
+    } catch (error: any) {
+        return { success: false, message: "Error al subir documento." };
+    } finally { connection.release(); }
+}
+
+export async function eliminarDocumentoGeneral(docId: number, fileUrl: string) {
+    const connection = await pool.getConnection();
+    try {
+        await connection.query("DELETE FROM employee_documents WHERE id = ?", [docId]);
+        try { await unlink(path.join(process.cwd(), 'public', fileUrl)); } catch (e) {}
+        return { success: true, message: "Documento eliminado correctamente." };
+    } catch (error: any) {
+        return { success: false, message: error.message };
+    } finally { connection.release(); }
 }

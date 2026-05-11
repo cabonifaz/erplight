@@ -29,13 +29,11 @@ export default async function InventoryPage(props: {
     let userBranchId = 0;
     if (userId) {
         try {
-            // ✨ CERO SQL CRUDO: Usamos el SP para traer la sucursal segura
             const [rows]: any = await pool.query("CALL sp_obtener_sucursal_principal_usuario(?)", [userId]);
             if (rows[0] && rows[0].length > 0) userBranchId = rows[0][0].branch_id;
         } catch (error) { console.error(error); }
     }
 
-    // ✨ CERO SQL CRUDO: Usamos el SP de productos
     const [productsResult]: any = await pool.query("CALL sp_listar_productos()");
     const productsList = productsResult[0] || [];
     const branches = await getBranches();
@@ -47,10 +45,8 @@ export default async function InventoryPage(props: {
     let finalBranchId = null;
 
     if (isRestricted) {
-        // 🔒 Si es almacenero o admin sucursal, FORZAMOS su ID.
         finalBranchId = userBranchId;
     } else {
-        // 🌍 Si es VIP, leemos la URL.
         finalBranchId = searchParams.branchId && searchParams.branchId !== "ALL" 
             ? Number(searchParams.branchId) 
             : null;
@@ -61,7 +57,6 @@ export default async function InventoryPage(props: {
     const max_stock = searchParams.maxStock ? Number(searchParams.maxStock) : null;
     const updated_from = searchParams.dateFrom || null;
 
-    // Llamamos al action con el branch seguro
     const stocks = await getInventoryStocks({
         branch_id: finalBranchId, 
         search,
@@ -104,13 +99,14 @@ export default async function InventoryPage(props: {
             />
 
             <div className="flex items-center gap-3 bg-white p-2 rounded-lg border shadow-sm w-fit">
-                {/* ✨ BLOQUEO VISUAL: Ocultamos el botón al ALMACENERO */}
+                {/* Ocultamos el botón al ALMACENERO */}
                 {userRole !== 'ALMACENERO' && (
                     <>
                         <InventoryActionsButton 
                             branches={branches} 
                             userRole={userRole} 
                             userBranchId={userBranchId} 
+                            productos={stocks} /* ✨ LE PASAMOS EL INVENTARIO ACTUAL AL BOTON ✨ */
                         />
                         <div className="h-6 w-px bg-gray-200 mx-1"></div>
                     </>
