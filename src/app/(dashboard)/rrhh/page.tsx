@@ -11,7 +11,9 @@ import {
     eliminarHorarioEmpleado, obtenerReporteHoras,
     obtenerDetalleHorasEmpleado,
     getContratosEmpleado, subirContratoEmpleado, eliminarContratoEmpleado,
-    obtenerIncidencias, crearIncidencia, obtenerDocumentosGenerales, subirDocumentoGeneral, eliminarDocumentoGeneral 
+    obtenerIncidencias, crearIncidencia, obtenerDocumentosGenerales, subirDocumentoGeneral, eliminarDocumentoGeneral,
+    obtenerAdelantosEmpleado, registrarAdelantoEmpleado, obtenerReporteAdelantosMensual,
+    obtenerPlanillaMensual // ✨ IMPORTAMOS LA NUEVA FUNCIÓN DE PLANILLA
 } from '@/actions/rrhh-actions';
 
 const getLunes = (d: Date) => {
@@ -40,18 +42,21 @@ export default function RRHHPage() {
     const [listaDocumentos, setListaDocumentos] = useState<any[]>([]);
     const [listaCargos, setListaCargos] = useState<any[]>([]);
     
-    // ✨ ACTUALIZADO: formData ahora incluye employment_type
     const [formData, setFormData] = useState({ 
         nombres: '', apellidos: '', tipo_documento_id: 0, numero_documento: '', 
         cargo_id: 0, salario_hora: '', fecha_nacimiento: '', employment_type: 'FULL TIME' 
     });
     
-    // ✨ NUEVOS ESTADOS PARA EL PERFIL DEL EMPLEADO
-    const [perfilTab, setPerfilTab] = useState('general'); // 'general', 'docs', 'incidencias'
+    const [perfilTab, setPerfilTab] = useState('general'); 
     const [listaDocsGenerales, setListaDocsGenerales] = useState<any[]>([]);
     const [listaIncidencias, setListaIncidencias] = useState<any[]>([]);
     const [nuevaIncidencia, setNuevaIncidencia] = useState({ incident_type: 'VACACIONES', start_date: '', end_date: '', reason: '' });
     const [nuevoDocNombre, setNuevoDocNombre] = useState('');
+    const [nuevoDocVencimiento, setNuevoDocVencimiento] = useState('');
+
+    const [listaAdelantos, setListaAdelantos] = useState<any[]>([]);
+    const [nuevoAdelanto, setNuevoAdelanto] = useState({ amount: '', requestDate: new Date().toISOString().split('T')[0], reason: '' });
+    const adelantoFileRef = useRef<HTMLInputElement>(null);
 
     const [horaActual, setHoraActual] = useState(new Date());
     const [empleadoMarcacion, setEmpleadoMarcacion] = useState('');
@@ -70,12 +75,22 @@ export default function RRHHPage() {
     const [reporteDatos, setReporteDatos] = useState<any[]>([]);
     const [cargandoReporte, setCargandoReporte] = useState(false);
 
+    const [adelantoMes, setAdelantoMes] = useState(new Date().getMonth() + 1);
+    const [adelantoAno, setAdelantoAno] = useState(new Date().getFullYear());
+    const [cargandoReporteAdelantos, setCargandoReporteAdelantos] = useState(false);
+
+    // ✨ ESTADOS PARA EL REPORTE DE PLANILLA FINAL
+    const [planillaMes, setPlanillaMes] = useState(new Date().getMonth() + 1);
+    const [planillaAno, setPlanillaAno] = useState(new Date().getFullYear());
+    const [planillaDatos, setPlanillaDatos] = useState<any[]>([]);
+    const [cargandoPlanilla, setCargandoPlanilla] = useState(false);
+
     const [isContratoModalOpen, setIsContratoModalOpen] = useState(false);
     const [contratoEmp, setContratoEmp] = useState({ id: 0, nombre: '' });
     const [contratosLista, setContratosLista] = useState<any[]>([]); 
     const [nuevoContratoFecha, setNuevoContratoFecha] = useState('');
     const fileInputRef = useRef<HTMLInputElement>(null);
-    const docInputRef = useRef<HTMLInputElement>(null); // Referencia separada para documentos generales
+    const docInputRef = useRef<HTMLInputElement>(null); 
     const [subiendoContrato, setSubiendoContrato] = useState(false); 
 
     const [isDetalleModalOpen, setIsDetalleModalOpen] = useState(false);
@@ -127,6 +142,7 @@ export default function RRHHPage() {
             cargarDatosSucursal();
             setEmpleadoMarcacion('');
             setReporteDatos([]);
+            setPlanillaDatos([]); // Limpiamos la planilla al cambiar de sucursal
         }
     }, [sucursalActiva, semanaActual]);
 
@@ -162,7 +178,6 @@ export default function RRHHPage() {
         setLoading(false);
     };
 
-    // ✨ FUNCIONES DEL PERFIL ACTUALIZADAS
     const handleAbrirNuevo = () => {
         setEditingId(null);
         setPerfilTab('general');
@@ -188,10 +203,14 @@ export default function RRHHPage() {
             employment_type: emp.employment_type || 'FULL TIME'
         });
         
-        // Cargamos la data de las otras pestañas
-        const [resDocs, resInc] = await Promise.all([obtenerDocumentosGenerales(emp.id), obtenerIncidencias(emp.id)]);
+        const [resDocs, resInc, resAdv] = await Promise.all([
+            obtenerDocumentosGenerales(emp.id), 
+            obtenerIncidencias(emp.id),
+            obtenerAdelantosEmpleado(emp.id)
+        ]);
         setListaDocsGenerales(resDocs.data || []);
         setListaIncidencias(resInc.data || []);
+        setListaAdelantos(resAdv.data || []);
         
         setIsModalOpen(true);
     };
@@ -346,9 +365,59 @@ export default function RRHHPage() {
 
         const ws = XLSX.utils.json_to_sheet(datosFormateados);
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "Planilla");
+        XLSX.utils.book_append_sheet(wb, ws, "Planilla Horas");
         
-        XLSX.writeFile(wb, `Planilla_Pagos_${reporteInicio}_al_${reporteFin}.xlsx`);
+        XLSX.writeFile(wb, `Planilla_Horas_${reporteInicio}_al_${reporteFin}.xlsx`);
+    };
+
+    const handleExportarAdelantos = async () => {
+        setCargandoReporteAdelantos(true);
+        const res = await obtenerReporteAdelantosMensual(sucursalActiva, adelantoMes, adelantoAno);
+        
+        if (res.success && res.data.length > 0) {
+            const ws = XLSX.utils.json_to_sheet(res.data);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Adelantos");
+            XLSX.writeFile(wb, `Reporte_Adelantos_Mes_${adelantoMes}_${adelantoAno}.xlsx`);
+        } else {
+            alert("No hay adelantos registrados en este mes para exportar.");
+        }
+        setCargandoReporteAdelantos(false);
+    };
+
+    // ✨ GENERAR PLANILLA DE PAGOS MENSUAL
+    const handleGenerarPlanilla = async () => {
+        setCargandoPlanilla(true);
+        const res = await obtenerPlanillaMensual(sucursalActiva, planillaMes, planillaAno);
+        if (res.success) {
+            setPlanillaDatos(res.data);
+        } else {
+            alert("Error al obtener la planilla: " + res.message);
+        }
+        setCargandoPlanilla(false);
+    };
+
+    // ✨ EXPORTAR PLANILLA A EXCEL
+    const handleExportarPlanilla = () => {
+        if (planillaDatos.length === 0) return alert("No hay datos para exportar. Genera la planilla primero.");
+        
+        const datosFormateados = planillaDatos.map(row => ({
+            "Documento": row.numero_documento,
+            "Personal": row.nombre_completo,
+            "Modalidad": row.employment_type,
+            "Salario/Hr": Number(row.salario_hora),
+            "Hrs Trabajadas": Number(row.horas_trabajadas),
+            "Hrs Permisos": Number(row.horas_permisos_pagados),
+            "Sueldo Bruto": Number(row.sueldoBruto),
+            "Adelantos": Number(row.total_adelantos),
+            "Neto a Pagar": Number(row.netoAPagar)
+        }));
+
+        const ws = XLSX.utils.json_to_sheet(datosFormateados);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Planilla Pagos");
+        
+        XLSX.writeFile(wb, `Planilla_Final_Mes_${planillaMes}_${planillaAno}.xlsx`);
     };
 
     const handleAbrirContratos = async (emp: any) => {
@@ -621,9 +690,10 @@ export default function RRHHPage() {
 
                 {activeTab === 'reportes' && (
                     <div className="space-y-6">
+                        {/* 1. REPORTE DE HORAS */}
                         <div className="flex flex-col sm:flex-row justify-between items-center bg-blue-50 p-6 rounded-xl border border-blue-100 shadow-sm">
                             <div>
-                                <h2 className="text-xl font-black text-blue-900">Reporte de Planilla</h2>
+                                <h2 className="text-xl font-black text-blue-900">Reporte de Planilla (Horas)</h2>
                                 <p className="text-sm text-blue-700 font-medium">Calcula el total de horas oficiales por empleado.</p>
                             </div>
                             <div className="flex flex-wrap items-center gap-3 mt-4 sm:mt-0">
@@ -639,26 +709,117 @@ export default function RRHHPage() {
                                     {cargandoReporte ? 'Calculando...' : 'Generar'}
                                 </button>
                                 <button onClick={handleExportarExcel} className="bg-green-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-green-700 shadow-md transition-all">
-                                    📥 Exportar Excel
+                                    📥 Exportar
                                 </button>
                             </div>
                         </div>
 
-                        <div className="overflow-x-auto border border-gray-200 rounded-lg shadow-sm">
-                            <table className="min-w-full text-left text-sm whitespace-nowrap">
-                                <thead className="bg-gray-800 text-white">
-                                    <tr>
-                                        <th className="p-4 font-semibold">Personal</th>
-                                        <th className="p-4 font-semibold text-center">Documento</th>
-                                        <th className="p-4 font-semibold text-center">Cargo</th>
-                                        <th className="p-4 font-black text-center text-yellow-400 bg-gray-900 text-base">Total Horas</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-200 bg-white">
-                                    {reporteDatos.length === 0 ? (
-                                        <tr><td colSpan={4} className="p-10 text-center text-gray-500 font-medium">Selecciona un rango de fechas y haz clic en "Generar".</td></tr>
-                                    ) : (
-                                        reporteDatos.map((row, i) => (
+                        {/* 2. REPORTE DE ADELANTOS MENSUALES */}
+                        <div className="flex flex-col sm:flex-row justify-between items-center bg-purple-50 p-6 rounded-xl border border-purple-100 shadow-sm mt-4">
+                            <div>
+                                <h2 className="text-xl font-black text-purple-900">Reporte de Adelantos de Sueldo</h2>
+                                <p className="text-sm text-purple-700 font-medium">Exporta todos los adelantos de esta sucursal por mes.</p>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-3 mt-4 sm:mt-0">
+                                <div className="bg-white p-2 rounded-lg border border-purple-200 flex items-center gap-2 shadow-sm">
+                                    <span className="text-xs font-bold text-gray-500 uppercase">Mes</span>
+                                    <select className="p-1 outline-none text-sm font-bold text-gray-800 bg-transparent" value={adelantoMes} onChange={e => setAdelantoMes(Number(e.target.value))}>
+                                        <option value="1">Enero</option><option value="2">Febrero</option><option value="3">Marzo</option>
+                                        <option value="4">Abril</option><option value="5">Mayo</option><option value="6">Junio</option>
+                                        <option value="7">Julio</option><option value="8">Agosto</option><option value="9">Setiembre</option>
+                                        <option value="10">Octubre</option><option value="11">Noviembre</option><option value="12">Diciembre</option>
+                                    </select>
+                                </div>
+                                <div className="bg-white p-2 rounded-lg border border-purple-200 flex items-center gap-2 shadow-sm">
+                                    <span className="text-xs font-bold text-gray-500 uppercase">Año</span>
+                                    <input type="number" min="2024" max="2030" className="p-1 w-16 outline-none text-sm font-bold text-gray-800" value={adelantoAno} onChange={e => setAdelantoAno(Number(e.target.value))} />
+                                </div>
+                                <button onClick={handleExportarAdelantos} disabled={cargandoReporteAdelantos} className="bg-purple-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-purple-700 shadow-md transition-all disabled:opacity-50">
+                                    {cargandoReporteAdelantos ? 'Generando...' : '📥 Exportar Excel'}
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* ✨ NUEVO: 3. CÁLCULO FINAL DE PLANILLA (NETO A PAGAR) */}
+                        <div className="flex flex-col sm:flex-row justify-between items-center bg-emerald-50 p-6 rounded-xl border border-emerald-100 shadow-sm mt-4">
+                            <div>
+                                <h2 className="text-xl font-black text-emerald-900">Cálculo de Planilla Final</h2>
+                                <p className="text-sm text-emerald-700 font-medium">Suma horas, permisos pagados y resta los adelantos del mes.</p>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-3 mt-4 sm:mt-0">
+                                <div className="bg-white p-2 rounded-lg border border-emerald-200 flex items-center gap-2 shadow-sm">
+                                    <span className="text-xs font-bold text-gray-500 uppercase">Mes</span>
+                                    <select className="p-1 outline-none text-sm font-bold text-gray-800 bg-transparent" value={planillaMes} onChange={e => setPlanillaMes(Number(e.target.value))}>
+                                        <option value="1">Enero</option><option value="2">Febrero</option><option value="3">Marzo</option>
+                                        <option value="4">Abril</option><option value="5">Mayo</option><option value="6">Junio</option>
+                                        <option value="7">Julio</option><option value="8">Agosto</option><option value="9">Setiembre</option>
+                                        <option value="10">Octubre</option><option value="11">Noviembre</option><option value="12">Diciembre</option>
+                                    </select>
+                                </div>
+                                <div className="bg-white p-2 rounded-lg border border-emerald-200 flex items-center gap-2 shadow-sm">
+                                    <span className="text-xs font-bold text-gray-500 uppercase">Año</span>
+                                    <input type="number" min="2024" max="2030" className="p-1 w-16 outline-none text-sm font-bold text-gray-800" value={planillaAno} onChange={e => setPlanillaAno(Number(e.target.value))} />
+                                </div>
+                                <button onClick={handleGenerarPlanilla} disabled={cargandoPlanilla} className="bg-emerald-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-emerald-700 shadow-md transition-all disabled:opacity-50">
+                                    {cargandoPlanilla ? 'Calculando...' : 'Ver Planilla'}
+                                </button>
+                                <button onClick={handleExportarPlanilla} className="bg-emerald-800 text-white px-6 py-3 rounded-lg font-bold hover:bg-emerald-900 shadow-md transition-all">
+                                    📥 Exportar
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* TABLA DE RESULTADOS PLANILLA FINAL */}
+                        {planillaDatos.length > 0 && (
+                            <div className="overflow-x-auto border border-emerald-200 rounded-lg shadow-sm mt-6">
+                                <table className="min-w-full text-left text-sm whitespace-nowrap">
+                                    <thead className="bg-emerald-800 text-white">
+                                        <tr>
+                                            <th className="p-4 font-semibold">Personal</th>
+                                            <th className="p-4 font-semibold text-center">Modalidad</th>
+                                            <th className="p-4 font-semibold text-center">Salario/Hr</th>
+                                            <th className="p-4 font-semibold text-center">Hrs Trab.</th>
+                                            <th className="p-4 font-semibold text-center">Hrs Permisos</th>
+                                            <th className="p-4 font-semibold text-center">Sueldo Bruto</th>
+                                            <th className="p-4 font-semibold text-center text-red-300">Adelantos</th>
+                                            <th className="p-4 font-black text-center text-yellow-400 bg-emerald-900 text-base">Neto a Pagar</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-200 bg-white">
+                                        {planillaDatos.map((row, i) => (
+                                            <tr key={i} className="hover:bg-emerald-50 transition-colors">
+                                                <td className="p-4 font-bold text-gray-800">{row.nombre_completo}</td>
+                                                <td className="p-4 text-center"><span className="bg-gray-100 border border-gray-200 text-gray-700 px-3 py-1 rounded-md text-xs font-bold">{row.employment_type}</span></td>
+                                                <td className="p-4 text-center text-gray-600 font-mono">S/ {Number(row.salario_hora).toFixed(2)}</td>
+                                                <td className="p-4 text-center text-blue-600 font-bold">{row.horas_trabajadas}h</td>
+                                                <td className="p-4 text-center text-orange-500 font-bold">{row.horas_permisos_pagados}h</td>
+                                                <td className="p-4 text-center text-gray-800 font-bold">S/ {Number(row.sueldoBruto).toFixed(2)}</td>
+                                                <td className="p-4 text-center text-red-500 font-bold">- S/ {Number(row.total_adelantos).toFixed(2)}</td>
+                                                <td className="p-4 text-center font-black text-xl text-emerald-700">
+                                                    S/ {Number(row.netoAPagar).toFixed(2)}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+
+                        {/* TABLA REPORTE HORAS BÁSICO (SE MANTIENE ABAJO SI HAY DATOS) */}
+                        {reporteDatos.length > 0 && (
+                            <div className="overflow-x-auto border border-gray-200 rounded-lg shadow-sm mt-6">
+                                <div className="bg-gray-100 p-2 font-bold text-gray-600 text-center text-xs uppercase tracking-wider">Desglose Básico de Horas</div>
+                                <table className="min-w-full text-left text-sm whitespace-nowrap">
+                                    <thead className="bg-gray-800 text-white">
+                                        <tr>
+                                            <th className="p-4 font-semibold">Personal</th>
+                                            <th className="p-4 font-semibold text-center">Documento</th>
+                                            <th className="p-4 font-semibold text-center">Cargo</th>
+                                            <th className="p-4 font-black text-center text-yellow-400 bg-gray-900 text-base">Total Horas</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-200 bg-white">
+                                        {reporteDatos.map((row, i) => (
                                             <tr key={i} className="hover:bg-gray-50 transition-colors">
                                                 <td className="p-4 font-bold text-gray-800">{row.nombre_completo}</td>
                                                 <td className="p-4 text-center text-gray-600 font-mono">{row.numero_documento}</td>
@@ -674,11 +835,11 @@ export default function RRHHPage() {
                                                     </button>
                                                 </td>
                                             </tr>
-                                        ))
-                                    )}
-                                </tbody>
-                            </table>
-                        </div>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
                     </div>
                 )}
             </div>
@@ -699,10 +860,11 @@ export default function RRHHPage() {
 
                         {/* Pestañas (Solo si estamos editando) */}
                         {editingId && (
-                            <div className="flex border-b bg-slate-50">
-                                <button onClick={() => setPerfilTab('general')} className={`flex-1 py-3 font-bold text-sm ${perfilTab === 'general' ? 'border-b-2 border-blue-600 text-blue-700 bg-white' : 'text-slate-500 hover:bg-slate-100'}`}>Datos Generales</button>
-                                <button onClick={() => setPerfilTab('docs')} className={`flex-1 py-3 font-bold text-sm ${perfilTab === 'docs' ? 'border-b-2 border-blue-600 text-blue-700 bg-white' : 'text-slate-500 hover:bg-slate-100'}`}>Documentos CV/DNI</button>
-                                <button onClick={() => setPerfilTab('incidencias')} className={`flex-1 py-3 font-bold text-sm ${perfilTab === 'incidencias' ? 'border-b-2 border-blue-600 text-blue-700 bg-white' : 'text-slate-500 hover:bg-slate-100'}`}>Licencias y Faltas</button>
+                            <div className="flex border-b bg-slate-50 overflow-x-auto">
+                                <button onClick={() => setPerfilTab('general')} className={`flex-1 py-3 px-4 font-bold text-sm min-w-max ${perfilTab === 'general' ? 'border-b-2 border-blue-600 text-blue-700 bg-white' : 'text-slate-500 hover:bg-slate-100'}`}>Datos Generales</button>
+                                <button onClick={() => setPerfilTab('docs')} className={`flex-1 py-3 px-4 font-bold text-sm min-w-max ${perfilTab === 'docs' ? 'border-b-2 border-blue-600 text-blue-700 bg-white' : 'text-slate-500 hover:bg-slate-100'}`}>Documentos CV/DNI</button>
+                                <button onClick={() => setPerfilTab('incidencias')} className={`flex-1 py-3 px-4 font-bold text-sm min-w-max ${perfilTab === 'incidencias' ? 'border-b-2 border-blue-600 text-blue-700 bg-white' : 'text-slate-500 hover:bg-slate-100'}`}>Permisos y Faltas</button>
+                                <button onClick={() => setPerfilTab('adelantos')} className={`flex-1 py-3 px-4 font-bold text-sm min-w-max ${perfilTab === 'adelantos' ? 'border-b-2 border-green-600 text-green-700 bg-white' : 'text-slate-500 hover:bg-slate-100'}`}>Adelantos S/</button>
                             </div>
                         )}
 
@@ -761,10 +923,14 @@ export default function RRHHPage() {
                                     <div className="bg-gray-50 p-4 rounded-xl border flex flex-col sm:flex-row gap-3 items-end">
                                         <div className="flex-1 w-full">
                                             <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Nombre (Ej: Copia DNI)</label>
-                                            <input type="text" className="w-full p-2 border rounded-md text-sm" value={nuevoDocNombre} onChange={e => setNuevoDocNombre(e.target.value)} />
+                                            <input type="text" className="w-full p-2 border rounded-md text-sm focus:ring-2 focus:ring-blue-500" value={nuevoDocNombre} onChange={e => setNuevoDocNombre(e.target.value)} />
+                                        </div>
+                                        <div className="flex-1 w-full max-w-[150px]">
+                                            <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Vence (Opcional)</label>
+                                            <input type="date" className="w-full p-2 border rounded-md text-sm focus:ring-2 focus:ring-blue-500" value={nuevoDocVencimiento} onChange={e => setNuevoDocVencimiento(e.target.value)} />
                                         </div>
                                         <div className="flex-1 w-full">
-                                            <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Archivo (PDF o Imagen)</label>
+                                            <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Archivo (PDF/Img)</label>
                                             <input type="file" ref={docInputRef} className="w-full text-sm p-1.5 border rounded-md bg-white" />
                                         </div>
                                         <button 
@@ -774,11 +940,13 @@ export default function RRHHPage() {
                                                 fd.append('file', docInputRef.current.files[0]); 
                                                 fd.append('employeeId', String(editingId)); 
                                                 fd.append('documentName', nuevoDocNombre);
+                                                if(nuevoDocVencimiento) fd.append('expirationDate', nuevoDocVencimiento);
                                                 
                                                 setLoading(true); 
                                                 const res = await subirDocumentoGeneral(fd);
                                                 if(res.success) { 
                                                     setNuevoDocNombre(''); 
+                                                    setNuevoDocVencimiento('');
                                                     if(docInputRef.current) docInputRef.current.value=''; 
                                                     const dr = await obtenerDocumentosGenerales(editingId); 
                                                     setListaDocsGenerales(dr.data); 
@@ -790,37 +958,73 @@ export default function RRHHPage() {
                                             disabled={loading} 
                                             className="bg-slate-800 text-white font-bold py-2 px-6 rounded-md hover:bg-slate-900 h-[38px] disabled:opacity-50"
                                         >
-                                            {loading ? '...' : 'Subir Archivo'}
+                                            {loading ? '...' : 'Subir'}
                                         </button>
                                     </div>
                                     <div className="border rounded-lg overflow-hidden">
                                         <table className="min-w-full text-sm text-left">
                                             <thead className="bg-slate-100 border-b">
-                                                <tr><th className="p-3 font-bold text-gray-700">Documento</th><th className="p-3 font-bold text-gray-700">Tipo</th><th className="p-3 font-bold text-gray-700 text-center">Acción</th></tr>
+                                                <tr>
+                                                    <th className="p-3 font-bold text-gray-700">Documento</th>
+                                                    <th className="p-3 font-bold text-gray-700 text-center">Tipo</th>
+                                                    <th className="p-3 font-bold text-gray-700 text-center">Vencimiento</th>
+                                                    <th className="p-3 font-bold text-gray-700 text-center">Acción</th>
+                                                </tr>
                                             </thead>
                                             <tbody className="divide-y">
-                                                {listaDocsGenerales.map(d => (
-                                                    <tr key={d.id} className="hover:bg-slate-50">
-                                                        <td className="p-3 font-medium text-gray-800">{d.document_name}</td>
-                                                        <td className="p-3"><span className="bg-gray-200 text-gray-700 px-2 py-0.5 rounded text-xs font-bold">{d.document_type}</span></td>
-                                                        <td className="p-3 text-center flex justify-center gap-4">
-                                                            <a href={d.file_url} target="_blank" className="text-blue-600 font-bold hover:underline">Ver</a>
-                                                            <button 
-                                                                onClick={async () => { 
-                                                                    if(confirm("¿Seguro que deseas eliminar este documento?")) { 
-                                                                        await eliminarDocumentoGeneral(d.id, d.file_url); 
-                                                                        const dr = await obtenerDocumentosGenerales(editingId); 
-                                                                        setListaDocsGenerales(dr.data); 
-                                                                    } 
-                                                                }} 
-                                                                className="text-red-500 font-bold hover:underline"
-                                                            >
-                                                                Eliminar
-                                                            </button>
-                                                        </td>
-                                                    </tr>
-                                                ))}
-                                                {listaDocsGenerales.length === 0 && <tr><td colSpan={3} className="p-8 text-center text-gray-400">Sin documentos registrados.</td></tr>}
+                                                {listaDocsGenerales.map(d => {
+                                                    const expDate = d.expiration_date ? new Date(d.expiration_date) : null;
+                                                    const today = new Date();
+                                                    let isExpiring = false;
+                                                    if (expDate) {
+                                                        const diffTime = expDate.getTime() - today.getTime();
+                                                        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                                                        isExpiring = diffDays <= 30;
+                                                    }
+
+                                                    return (
+                                                        <tr key={d.id} className="hover:bg-slate-50">
+                                                            <td className="p-3 font-medium text-gray-800">
+                                                                {d.document_name}
+                                                            </td>
+                                                            <td className="p-3 text-center">
+                                                                <span className="bg-gray-200 text-gray-700 px-2 py-0.5 rounded text-[10px] uppercase font-bold">{d.document_type}</span>
+                                                            </td>
+                                                            <td className="p-3 text-center">
+                                                                {d.expiration_date ? (
+                                                                    <div className="flex flex-col items-center">
+                                                                        <span className="text-gray-600 font-mono text-xs">
+                                                                            {new Date(d.expiration_date).toLocaleDateString('es-PE', {timeZone: 'UTC'})}
+                                                                        </span>
+                                                                        {isExpiring && (
+                                                                            <span className="text-[9px] bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold border border-red-200 mt-1 uppercase">
+                                                                                🔴 Vence pronto
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                ) : (
+                                                                    <span className="text-gray-400 italic text-xs">No caduca</span>
+                                                                )}
+                                                            </td>
+                                                            <td className="p-3 text-center flex justify-center gap-4">
+                                                                <a href={d.file_url} target="_blank" className="text-blue-600 font-bold hover:underline">Ver</a>
+                                                                <button 
+                                                                    onClick={async () => { 
+                                                                        if(confirm("¿Seguro que deseas eliminar este documento?")) { 
+                                                                            await eliminarDocumentoGeneral(d.id, d.file_url); 
+                                                                            const dr = await obtenerDocumentosGenerales(editingId); 
+                                                                            setListaDocsGenerales(dr.data); 
+                                                                        } 
+                                                                    }} 
+                                                                    className="text-red-500 font-bold hover:underline"
+                                                                >
+                                                                    Eliminar
+                                                                </button>
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                                {listaDocsGenerales.length === 0 && <tr><td colSpan={4} className="p-8 text-center text-gray-400">Sin documentos registrados.</td></tr>}
                                             </tbody>
                                         </table>
                                     </div>
@@ -838,6 +1042,9 @@ export default function RRHHPage() {
                                                 <option value="LICENCIA_CG">✅ Licencia Con Goce</option>
                                                 <option value="LICENCIA_SG">❌ Licencia Sin Goce</option>
                                                 <option value="AMONESTACION">⚠️ Amonestación</option>
+                                                <option value="DIA_COMPENSABLE">♻️ Día Compensable</option>
+                                                <option value="DIA_A_DESCONTAR">📉 Día a Descontar</option>
+                                                <option value="PERMISO_SALUD">🏥 Permiso por Salud</option>
                                             </select>
                                         </div>
                                         <div>
@@ -850,7 +1057,7 @@ export default function RRHHPage() {
                                         </div>
                                         <div className="flex-1">
                                             <label className="block text-xs font-bold text-orange-800 uppercase mb-1">Detalle / Motivo</label>
-                                            <input type="text" className="w-full p-2 border border-orange-200 bg-white rounded-md text-sm" placeholder="Ej: Viaje familiar" value={nuevaIncidencia.reason} onChange={e => setNuevaIncidencia({...nuevaIncidencia, reason: e.target.value})} />
+                                            <input type="text" className="w-full p-2 border border-orange-200 bg-white rounded-md text-sm" placeholder="Ej: Viaje familiar / Cita médica" value={nuevaIncidencia.reason} onChange={e => setNuevaIncidencia({...nuevaIncidencia, reason: e.target.value})} />
                                         </div>
                                         <button 
                                             onClick={async () => {
@@ -881,7 +1088,7 @@ export default function RRHHPage() {
                                             <tbody className="divide-y">
                                                 {listaIncidencias.map(inc => (
                                                     <tr key={inc.id} className="hover:bg-slate-50">
-                                                        <td className="p-3 font-black text-gray-700">{inc.incident_type.replace('_', ' ')}</td>
+                                                        <td className="p-3 font-black text-gray-700">{inc.incident_type.replace(/_/g, ' ')}</td>
                                                         <td className="p-3 text-gray-600 font-mono text-xs">
                                                             {new Date(inc.start_date).toLocaleDateString('es-PE', {timeZone: 'UTC'})} 
                                                             {inc.end_date && ` al ${new Date(inc.end_date).toLocaleDateString('es-PE', {timeZone: 'UTC'})}`}
@@ -889,12 +1096,95 @@ export default function RRHHPage() {
                                                         <td className="p-3 italic text-gray-500">{inc.reason || '-'}</td>
                                                     </tr>
                                                 ))}
-                                                {listaIncidencias.length === 0 && <tr><td colSpan={3} className="p-8 text-center text-gray-400">Sin registros de faltas o vacaciones.</td></tr>}
+                                                {listaIncidencias.length === 0 && <tr><td colSpan={3} className="p-8 text-center text-gray-400">Sin registros de faltas, permisos o vacaciones.</td></tr>}
                                             </tbody>
                                         </table>
                                     </div>
                                 </div>
                             )}
+
+                            {/* ✨ PESTAÑA 4: ADELANTOS DE SUELDO ✨ */}
+                            {perfilTab === 'adelantos' && editingId && (
+                                <div className="space-y-6">
+                                    <div className="bg-green-50 p-4 rounded-xl border border-green-100 flex flex-col sm:flex-row gap-3 items-end">
+                                        <div>
+                                            <label className="block text-xs font-bold text-green-800 uppercase mb-1">Monto (S/)</label>
+                                            <input type="number" step="10" className="w-24 p-2 border border-green-200 bg-white rounded-md text-sm font-black text-green-900 focus:ring-2 focus:ring-green-500" value={nuevoAdelanto.amount} onChange={e => setNuevoAdelanto({...nuevoAdelanto, amount: e.target.value})} placeholder="0.00" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-bold text-green-800 uppercase mb-1">Fecha de Pago</label>
+                                            <input type="date" className="p-2 border border-green-200 bg-white rounded-md text-sm focus:ring-2 focus:ring-green-500" value={nuevoAdelanto.requestDate} onChange={e => setNuevoAdelanto({...nuevoAdelanto, requestDate: e.target.value})} />
+                                        </div>
+                                        <div className="flex-1">
+                                            <label className="block text-xs font-bold text-green-800 uppercase mb-1">Voucher / Evidencia</label>
+                                            <input type="file" ref={adelantoFileRef} className="w-full text-sm p-1.5 border border-green-200 rounded-md bg-white focus:ring-2 focus:ring-green-500" />
+                                        </div>
+                                        <div className="flex-1">
+                                            <label className="block text-xs font-bold text-green-800 uppercase mb-1">Motivo (Opcional)</label>
+                                            <input type="text" className="w-full p-2 border border-green-200 bg-white rounded-md text-sm focus:ring-2 focus:ring-green-500" placeholder="Ej: Urgencia familiar" value={nuevoAdelanto.reason} onChange={e => setNuevoAdelanto({...nuevoAdelanto, reason: e.target.value})} />
+                                        </div>
+                                        <button 
+                                            onClick={async () => {
+                                                if(!nuevoAdelanto.amount || !adelantoFileRef.current?.files?.[0]) return alert("Falta ingresar el monto o adjuntar el voucher.");
+                                                
+                                                const fd = new FormData(); 
+                                                fd.append('file', adelantoFileRef.current.files[0]); 
+                                                fd.append('employeeId', String(editingId)); 
+                                                fd.append('amount', nuevoAdelanto.amount);
+                                                fd.append('requestDate', nuevoAdelanto.requestDate);
+                                                if(nuevoAdelanto.reason) fd.append('reason', nuevoAdelanto.reason);
+                                                
+                                                setLoading(true); 
+                                                const res = await registrarAdelantoEmpleado(fd);
+                                                if(res.success) { 
+                                                    setNuevoAdelanto({ amount: '', requestDate: new Date().toISOString().split('T')[0], reason: '' });
+                                                    if(adelantoFileRef.current) adelantoFileRef.current.value=''; 
+                                                    const dr = await obtenerAdelantosEmpleado(editingId); 
+                                                    setListaAdelantos(dr.data); 
+                                                } else {
+                                                    alert(res.message);
+                                                }
+                                                setLoading(false);
+                                            }} 
+                                            disabled={loading} 
+                                            className="bg-green-600 text-white font-bold py-2 px-6 rounded-md hover:bg-green-700 h-[38px] disabled:opacity-50"
+                                        >
+                                            {loading ? '...' : 'Pagar'}
+                                        </button>
+                                    </div>
+
+                                    <div className="border rounded-lg overflow-hidden">
+                                        <table className="min-w-full text-sm text-left">
+                                            <thead className="bg-slate-100 border-b">
+                                                <tr>
+                                                    <th className="p-3 font-bold text-gray-700">Fecha</th>
+                                                    <th className="p-3 font-bold text-gray-700">Monto</th>
+                                                    <th className="p-3 font-bold text-gray-700">Motivo</th>
+                                                    <th className="p-3 font-bold text-gray-700 text-center">Voucher</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y">
+                                                {listaAdelantos.map(adv => (
+                                                    <tr key={adv.id} className="hover:bg-slate-50">
+                                                        <td className="p-3 text-gray-600 font-mono text-xs">
+                                                            {new Date(adv.request_date).toLocaleDateString('es-PE', {timeZone: 'UTC'})}
+                                                        </td>
+                                                        <td className="p-3 font-black text-green-700 text-base">S/ {Number(adv.amount).toFixed(2)}</td>
+                                                        <td className="p-3 italic text-gray-500">{adv.reason || 'Sin observación'}</td>
+                                                        <td className="p-3 text-center">
+                                                            <a href={adv.file_url} target="_blank" className="text-blue-600 font-bold hover:underline flex items-center justify-center gap-1">
+                                                                👁️ Ver Evidencia
+                                                            </a>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                                {listaAdelantos.length === 0 && <tr><td colSpan={4} className="p-8 text-center text-gray-400">Este empleado no tiene adelantos registrados.</td></tr>}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
+
                         </div>
                     </div>
                 </div>

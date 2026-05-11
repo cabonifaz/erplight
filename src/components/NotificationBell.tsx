@@ -5,7 +5,8 @@ import { useSession } from 'next-auth/react';
 import { 
     obtenerNotificacionesCumpleanos, 
     obtenerNotificacionesGenerales,
-    obtenerNotificacionesContratos // ✨ IMPORTAMOS LA NUEVA ACCIÓN
+    obtenerNotificacionesContratos,
+    obtenerAlertasDocumentos // ✨ IMPORTAMOS LA NUEVA ACCIÓN
 } from '@/actions/rrhh-actions';
 
 interface NotificacionEstandar {
@@ -25,12 +26,12 @@ export default function NotificationBell() {
 
     useEffect(() => {
         const cargarNotificaciones = async () => {
-            const rolCrudo = (session?.user as any)?.role || 'GERENTE GENERAL'; // ✨ Cambia el default a espacio
-const rolUsuario = rolCrudo.toUpperCase().trim(); // ✨ QUITAMOS el .replace(' ', '_')
+            const rolCrudo = (session?.user as any)?.role || 'GERENTE GENERAL'; 
+            const rolUsuario = rolCrudo.toUpperCase().trim(); 
             const branchId = (session?.user as any)?.branch_id || 1;
             const userId = (session?.user as any)?.id; 
             
-            let bandejaGenérica: NotificacionEstandar[] = [];
+            let bandejaGenerica: NotificacionEstandar[] = [];
 
             // 1. CARGAMOS LOS CUMPLEAÑOS
             const resCumples = await obtenerNotificacionesCumpleanos(branchId, rolUsuario);
@@ -43,12 +44,12 @@ const rolUsuario = rolCrudo.toUpperCase().trim(); // ✨ QUITAMOS el .replace(' 
                     subtexto: n.nombre_sucursal,
                     resaltado: n.cuando === 'HOY'
                 }));
-                bandejaGenérica = [...bandejaGenérica, ...cumplesFormateados];
+                bandejaGenerica = [...bandejaGenerica, ...cumplesFormateados];
             }
 
-            // ✨ 2. CARGAMOS ALERTAS DE CONTRATOS (Solo para Gerencias)
-            const rolesAlertaContrato = ['GERENTE GENERAL', 'GERENTE DE LOGISTICA', 'ADMINISTRADOR GENERAL'];
-            if (rolesAlertaContrato.includes(rolUsuario)) {
+            // 2. CARGAMOS ALERTAS DE CONTRATOS (Solo para Gerencias)
+            const rolesAlerta = ['GERENTE GENERAL', 'GERENTE DE LOGISTICA', 'ADMINISTRADOR GENERAL', 'ADMIN_SUCURSAL'];
+            if (rolesAlerta.includes(rolUsuario)) {
                 const resContratos = await obtenerNotificacionesContratos();
                 if (resContratos.success && resContratos.data) {
                     const contratosFormateados = resContratos.data.map((n: any) => ({
@@ -57,13 +58,27 @@ const rolUsuario = rolCrudo.toUpperCase().trim(); // ✨ QUITAMOS el .replace(' 
                         titulo: 'Renovación Pendiente',
                         mensaje: `El contrato de ${n.nombre_completo} vence en ${n.dias_restantes} días.`,
                         subtexto: n.nombre_sucursal,
-                        resaltado: true // Siempre resaltado en rojo/azul porque es urgente
+                        resaltado: true 
                     }));
-                    bandejaGenérica = [...bandejaGenérica, ...contratosFormateados];
+                    bandejaGenerica = [...bandejaGenerica, ...contratosFormateados];
+                }
+
+                // ✨ 3. CARGAMOS ALERTAS DE DOCUMENTOS GENERALES VENCIDOS (Carnets, DNI, etc.)
+                const resDocs = await obtenerAlertasDocumentos();
+                if (resDocs.success && resDocs.data) {
+                    const docsFormateados = resDocs.data.map((n: any) => ({
+                        id: `doc-vencido-${n.document_id}`,
+                        icono: '🚨',
+                        titulo: 'Documento por Vencer',
+                        mensaje: `El documento "${n.document_name}" de ${n.nombre_completo} vence en ${n.dias_restantes} días.`,
+                        subtexto: 'ACTUALIZACIÓN REQUERIDA',
+                        resaltado: true 
+                    }));
+                    bandejaGenerica = [...bandejaGenerica, ...docsFormateados];
                 }
             }
 
-            // 3. CARGAMOS LAS NOTIFICACIONES GENERALES DE LA BD
+            // 4. CARGAMOS LAS NOTIFICACIONES GENERALES DE LA BD
             if (userId) {
                 const resGenerales = await obtenerNotificacionesGenerales(Number(userId));
                 if (resGenerales.success && resGenerales.data) {
@@ -81,11 +96,11 @@ const rolUsuario = rolCrudo.toUpperCase().trim(); // ✨ QUITAMOS el .replace(' 
                             resaltado: true 
                         };
                     });
-                    bandejaGenérica = [...bandejaGenérica, ...generalesFormateadas];
+                    bandejaGenerica = [...bandejaGenerica, ...generalesFormateadas];
                 }
             }
 
-            setNotificaciones(bandejaGenérica);
+            setNotificaciones(bandejaGenerica);
         };
         if (session) cargarNotificaciones();
     }, [session]);

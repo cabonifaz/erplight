@@ -577,10 +577,12 @@ export async function obtenerDocumentosGenerales(employeeId: number) {
     } finally { connection.release(); }
 }
 
+// ✨ ACTUALIZADO: AHORA INCLUYE LA FECHA DE CADUCIDAD Y EL SAFE NAME
 export async function subirDocumentoGeneral(formData: FormData) {
     const file = formData.get('file') as File;
     const employeeId = Number(formData.get('employeeId'));
     const documentName = formData.get('documentName') as string;
+    const expirationDate = formData.get('expirationDate') as string; // ✨ ATRAPAMOS LA FECHA
 
     if (!file || !employeeId || !documentName) return { success: false, message: "Faltan datos requeridos." };
 
@@ -588,6 +590,7 @@ export async function subirDocumentoGeneral(formData: FormData) {
     try {
         const bytes = await file.arrayBuffer();
         const buffer = Buffer.from(bytes);
+        
         // Generamos un nombre seguro para el archivo
         const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
         const filename = `doc_${employeeId}_${Date.now()}_${safeName}`;
@@ -600,9 +603,10 @@ export async function subirDocumentoGeneral(formData: FormData) {
         
         const fileUrl = `/contratos/${filename}`;
         
+        // ✨ ACTUALIZAMOS EL INSERT PARA INCLUIR LA FECHA DE CADUCIDAD
         await connection.query(
-            "INSERT INTO employee_documents (employee_id, document_name, document_type, file_url) VALUES (?, ?, ?, ?)", 
-            [employeeId, documentName, file.type.includes('pdf') ? 'PDF' : 'IMAGEN', fileUrl]
+            "INSERT INTO employee_documents (employee_id, document_name, document_type, file_url, expiration_date) VALUES (?, ?, ?, ?, ?)", 
+            [employeeId, documentName, file.type.includes('pdf') ? 'PDF' : 'IMAGEN', fileUrl, expirationDate ? expirationDate : null]
         );
         return { success: true, message: "Documento guardado exitosamente." };
     } catch (error: any) {
@@ -616,6 +620,103 @@ export async function eliminarDocumentoGeneral(docId: number, fileUrl: string) {
         await connection.query("DELETE FROM employee_documents WHERE id = ?", [docId]);
         try { await unlink(path.join(process.cwd(), 'public', fileUrl)); } catch (e) {}
         return { success: true, message: "Documento eliminado correctamente." };
+    } catch (error: any) {
+        return { success: false, message: error.message };
+    } finally { connection.release(); }
+}
+
+// ✨ NUEVA FUNCIÓN PARA LAS ALERTAS DE DOCUMENTOS VENCIDOS
+export async function obtenerAlertasDocumentos() {
+    const connection = await pool.getConnection();
+    try {
+        const [rows]: any = await connection.query("CALL sp_obtener_alertas_documentos_vencidos()");
+        return { success: true, data: rows[0] || [] };
+    } catch (error: any) {
+        return { success: false, message: error.message };
+    } finally {
+        connection.release();
+    }
+}
+
+// ==========================================
+// ✨ NUEVO MÓDULO: ADELANTOS DE SUELDO
+// ==========================================
+
+export async function obtenerAdelantosEmpleado(employeeId: number) {
+    const connection = await pool.getConnection();
+    try {
+        const [rows]: any = await connection.query("CALL sp_rrhh_listar_adelantos_empleado(?)", [employeeId]);
+        return { success: true, data: rows[0] || [] };
+    } catch (error) {
+        return { success: false, data: [] };
+    } finally { connection.release(); }
+}
+
+export async function registrarAdelantoEmpleado(formData: FormData) {
+    const file = formData.get('file') as File;
+    const employeeId = Number(formData.get('employeeId'));
+    const amount = Number(formData.get('amount'));
+    const requestDate = formData.get('requestDate') as string;
+    const reason = formData.get('reason') as string;
+
+    if (!file || !employeeId || !amount || !requestDate) {
+        return { success: false, message: "Faltan datos o voucher adjunto." };
+    }
+
+    const connection = await pool.getConnection();
+    try {
+        const bytes = await file.arrayBuffer();
+        const buffer = Buffer.from(bytes);
+        const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+        const filename = `adelanto_${employeeId}_${Date.now()}_${safeName}`;
+        
+        // Lo guardamos en una carpeta nueva llamada "comprobantes"
+        const uploadDir = path.join(process.cwd(), 'public', 'comprobantes'); 
+        try { await mkdir(uploadDir, { recursive: true }); } catch (e) {}
+        await writeFile(path.join(uploadDir, filename), buffer);
+        
+        const fileUrl = `/comprobantes/${filename}`;
+        
+        await connection.query(
+            "CALL sp_rrhh_registrar_adelanto(?, ?, ?, ?, ?)", 
+            [employeeId, amount, requestDate, reason, fileUrl]
+        );
+        return { success: true, message: "Adelanto registrado exitosamente." };
+    } catch (error: any) {
+        return { success: false, message: "Error al registrar el adelanto." };
+    } finally { connection.release(); }
+}
+
+export async function obtenerReporteAdelantosMensual(branchId: number, month: number, year: number) {
+    const connection = await pool.getConnection();
+    try {
+        const [rows]: any = await connection.query("CALL sp_rrhh_reporte_adelantos_mensual(?, ?, ?)", [branchId, month, year]);
+        return { success: true, data: rows[0] || [] };
+    } catch (error: any) {
+        return { success: false, message: "Error al obtener reporte." };
+    } finally { connection.release(); }
+}
+
+export async function obtenerPlanillaMensual(branchId: number, month: number, year: number) {
+    const connection = await pool.getConnection();
+    try {
+        const [rows]: any = await connection.query("CALL sp_rrhh_calcular_planilla_mensual(?, ?, ?)", [branchId, month, year]);
+        
+        // Formateamos los datos para que el Frontend los entienda fácil
+        const planilla = rows[0].map((emp: any) => {
+            const totalHorasPagadas = Number(emp.horas_trabajadas) + Number(emp.horas_permisos_pagados);
+            const sueldoBruto = totalHorasPagadas * Number(emp.salario_hora);
+            const netoAPagar = sueldoBruto - Number(emp.total_adelantos);
+
+            return {
+                ...emp,
+                totalHorasPagadas,
+                sueldoBruto,
+                netoAPagar
+            };
+        });
+
+        return { success: true, data: planilla };
     } catch (error: any) {
         return { success: false, message: error.message };
     } finally { connection.release(); }

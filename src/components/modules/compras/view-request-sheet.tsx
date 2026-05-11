@@ -76,9 +76,9 @@ export function ViewRequestSheet({ request, open, onOpenChange }: ViewRequestShe
     const userRole = session?.user?.role ? session.user.role.toUpperCase().trim() : "";
     const status = currentRequest?.status_code;
 
-const PRIVILEGED = ['CEO', 'GERENTE DE LOGISTICA', 'ADMINISTRADOR GENERAL', 'CONTADOR', 'ADMIN', 'GERENTE GENERAL'];
+const PRIVILEGED = ['CEO', 'GERENTE DE LOGISTICA', 'ADMINISTRADOR GENERAL', 'CONTADOR', 'ADMIN', 'GERENTE GENERAL', 'ADMIN_SUCURSAL'];
 const WAREHOUSE = ['ADMIN_SUCURSAL', 'ALMACENERO', 'GERENTE DE LOGISTICA', 'ADMINISTRADOR GENERAL', 'CEO', 'GERENTE GENERAL'];
-const ACCOUNTING = ['CEO', 'ADMINISTRADOR GENERAL', 'GERENTE DE LOGISTICA', 'CONTADOR', 'GERENTE GENERAL'];
+const ACCOUNTING = ['CEO', 'ADMINISTRADOR GENERAL', 'GERENTE DE LOGISTICA', 'CONTADOR', 'GERENTE GENERAL', 'ADMIN_SUCURSAL'];
 
     let canUploadPayments = false;
     if (status === 'VALIDADA') canUploadPayments = false;
