@@ -9,7 +9,7 @@ import {
   LayoutDashboard, ShoppingCart, Package, Users, Settings, FileText,
   Truck, ClipboardList, Search, Building, UserCog, ChevronDown, 
   Upload, History, TrendingUp, BarChart, Globe, CalendarDays,
-  Building2, Briefcase
+  Building2, Briefcase, Lock
 } from "lucide-react";
 import { getLogoUrl } from "@/actions/client-actions"; 
 
@@ -43,6 +43,8 @@ export const menuItems: MenuItem[] = [
     isDropdown: true, 
     subItems: [
       { href: "/inventario", label: "Stock Actual", icon: Package },
+      { href: "/inventario/almacenes", label: "Gestión de Almacenes", icon: Users }, // ✨ NUEVA PANTALLA
+      { href: "/inventario/cierre", label: "Cierre de Almacén", icon: Lock }, 
       { href: "/recetas", label: "Configurar Recetas", icon: Settings }
     ]
   },

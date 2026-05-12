@@ -5,7 +5,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { 
-    MapPin, 
+    Package, 
     AlertTriangle, 
     Eye, 
     AlertCircle, 
@@ -34,7 +34,8 @@ export function InventoryTable({ stocks }: { stocks: any[] }) {
             <Table>
                 <TableHeader>
                     <TableRow className="bg-gray-50 hover:bg-gray-50">
-                        <TableHead className="w-[180px]">Sucursal</TableHead>
+                        {/* ✨ CAMBIADO: Ahora dice Almacén y es más ancha para que quepa el nombre largo */}
+                        <TableHead className="w-[250px]">Almacén</TableHead>
                         <TableHead className="w-[100px]">Código</TableHead>
                         <TableHead>Producto</TableHead>
                         <TableHead className="text-right">Stock Actual</TableHead>
@@ -45,7 +46,6 @@ export function InventoryTable({ stocks }: { stocks: any[] }) {
                 </TableHeader>
                 <TableBody>
                     {stocks.map((item) => {
-                        // ✨ LÓGICA NUEVA: Calculamos el estado real del stock matemáticamente
                         const currentStock = Number(item.stock_current || 0);
                         const minStock = Number(item.min_stock || 0);
                         const reorderPoint = Number(item.reorder_point || 0);
@@ -65,8 +65,11 @@ export function InventoryTable({ stocks }: { stocks: any[] }) {
                                 
                                 <TableCell className="font-medium text-gray-600">
                                     <div className="flex items-center gap-2">
-                                        <MapPin className="w-4 h-4 text-gray-400" />
-                                        {item.branch_name}
+                                        {/* ✨ CAMBIADO: Icono de Almacén y lee warehouse_name */}
+                                        <Package className="w-4 h-4 text-blue-500 shrink-0" />
+                                        <span className="truncate" title={item.warehouse_name || item.branch_name}>
+                                            {item.warehouse_name || item.branch_name}
+                                        </span>
                                     </div>
                                 </TableCell>
                                 
@@ -101,10 +104,8 @@ export function InventoryTable({ stocks }: { stocks: any[] }) {
                                     </div>
                                 </TableCell>
 
-                                {/* ✨ LÓGICA NUEVA: Columna de alertas mejorada */}
                                 <TableCell>
                                     <div className="flex flex-col gap-1.5">
-                                        {/* Alerta de Agotado/Crítico en rojo */}
                                         {realStatus === 'CRITICAL' && (
                                             <div className="flex items-center gap-1.5 text-red-700 bg-red-50 border border-red-100 px-2 py-1 rounded-md w-fit shadow-sm">
                                                 <AlertCircle className="w-3.5 h-3.5" />
@@ -114,7 +115,6 @@ export function InventoryTable({ stocks }: { stocks: any[] }) {
                                             </div>
                                         )}
 
-                                        {/* Alerta de Vencimiento existente */}
                                         {Number(item.expiring_soon_qty) > 0 && (
                                             <div className="flex items-center gap-1.5 text-orange-700 bg-orange-50 border border-orange-100 px-2 py-1 rounded-md w-fit shadow-sm">
                                                 <CalendarClock className="w-3.5 h-3.5" />
@@ -125,7 +125,6 @@ export function InventoryTable({ stocks }: { stocks: any[] }) {
                                             </div>
                                         )}
 
-                                        {/* Guion si no hay alertas */}
                                         {realStatus !== 'CRITICAL' && Number(item.expiring_soon_qty) <= 0 && (
                                             <span className="text-gray-300 text-xs">-</span>
                                         )}
@@ -171,7 +170,7 @@ export function InventoryTable({ stocks }: { stocks: any[] }) {
                     branchId={selectedItem.branch_id}
                     productId={selectedItem.product_id}
                     productName={selectedItem.product_name}
-                    branchName={selectedItem.branch_name}
+                    branchName={selectedItem.warehouse_name || selectedItem.branch_name} // Pasa el nombre del almacén al Modal
                     currentStock={selectedItem.stock_current}
                     unitMeasure={selectedItem.unit_measure}
                     lastUpdate={selectedItem.last_update}

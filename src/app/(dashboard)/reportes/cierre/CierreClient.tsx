@@ -1,17 +1,16 @@
 'use client'
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { getCierreInventario } from "@/actions/report-actions";
 import { obtenerResumenVentasDiarias, verificarEstadoCierre, enviarCierreDiario } from "@/actions/cierre-financiero-actions";
 import { 
     AlertTriangle, TrendingUp, TrendingDown, PackageSearch, Search, 
-    Package, DollarSign, Receipt, CreditCard, Calculator, Clock, ChevronDown, ChevronUp, Lock, Send, CheckCircle
+    Package, DollarSign, Receipt, CreditCard, Calculator, Clock, ChevronDown, ChevronUp, Lock, Send, CheckCircle, Wallet
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Cell } from 'recharts';
 
 export default function CierreClient({ sucursales }: { sucursales: any[] }) {
     const [branchId, setBranchId] = useState(sucursales[0]?.id?.toString() || "");
-    // ✨ FORZAMOS LA HORA A UTC-5 (PERÚ) PARA EVITAR VIAJES EN EL TIEMPO
     const [fecha, setFecha] = useState(() => {
         return new Intl.DateTimeFormat('en-CA', { 
             timeZone: 'America/Lima', 
@@ -23,9 +22,16 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
     const [loading, setLoading] = useState(false);
     const [hasSearched, setHasSearched] = useState(false);
 
-    // ✨ ESTADOS DE BLOQUEO DE CIERRE
+    // ESTADOS DE BLOQUEO DE CIERRE
     const [isClosed, setIsClosed] = useState(false);
     const [isSending, setIsSending] = useState(false);
+
+    // ✨ ESTADOS PARA EL DESGLOSE DE EFECTIVO
+    const [showCashBreakdown, setShowCashBreakdown] = useState(false);
+    const [cashBreakdown, setCashBreakdown] = useState({
+        billetes_200: '', billetes_100: '', billetes_50: '', billetes_20: '', billetes_10: '',
+        monedas_5: '', monedas_2: '', monedas_1: '', monedas_050: '', monedas_020: '', monedas_010: ''
+    });
 
     const [datos, setDatos] = useState<any[]>([]);
     const [datosPagos, setDatosPagos] = useState<any[]>([]);
@@ -37,7 +43,6 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
     const [kpis, setKpis] = useState({ total_operaciones: 0, total_dinero: 0, ticket_promedio: 0 });
     const [pestañaActiva, setPestañaActiva] = useState("inventario");
 
-    // ✨ FUNCIÓN PARA FORMATEAR MONEDA CON COMAS
     const formatMoneda = (valor: any) => {
         return new Intl.NumberFormat('en-US', { 
             minimumFractionDigits: 2,
@@ -50,14 +55,53 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
     const totalDineroArticulos = datosArticulos.reduce((sum, item) => sum + Number(item.total_generado), 0);
     const totalCantidadArticulos = datosArticulos.reduce((sum, item) => sum + Number(item.cantidad_vendida), 0);
 
+    // ✨ CÁLCULO EN TIEMPO REAL DEL EFECTIVO FÍSICO
+    const calcularEfectivoFisico = () => {
+        return (
+            (Number(cashBreakdown.billetes_200) * 200) +
+            (Number(cashBreakdown.billetes_100) * 100) +
+            (Number(cashBreakdown.billetes_50) * 50) +
+            (Number(cashBreakdown.billetes_20) * 20) +
+            (Number(cashBreakdown.billetes_10) * 10) +
+            (Number(cashBreakdown.monedas_5) * 5) +
+            (Number(cashBreakdown.monedas_2) * 2) +
+            (Number(cashBreakdown.monedas_1) * 1) +
+            (Number(cashBreakdown.monedas_050) * 0.50) +
+            (Number(cashBreakdown.monedas_020) * 0.20) +
+            (Number(cashBreakdown.monedas_010) * 0.10)
+        );
+    };
+
+    // ✨ EXTRACCIÓN DEL EFECTIVO ESPERADO EN EL SISTEMA
+    const pagoEfectivo = datosPagos.find(p => p.metodo_pago?.toUpperCase() === 'EFECTIVO');
+    const totalEfectivoEsperado = pagoEfectivo ? Number(pagoEfectivo.total_recaudado) : 0;
+    const totalFisico = calcularEfectivoFisico();
+    const diferenciaEfectivo = totalFisico - totalEfectivoEsperado;
+    
+    // Validamos si la diferencia es 0 (permitimos un margen de 2 céntimos por si hay redondeos extraños en la BD)
+    const isCuadrado = Math.abs(diferenciaEfectivo) <= 0.02;
+
+    // ✨ EFECTO PARA LIMPIAR LA CALCULADORA SI CAMBIAN DE FECHA O SUCURSAL SIN DARLE A GENERAR
+    useEffect(() => {
+        setCashBreakdown({
+            billetes_200: '', billetes_100: '', billetes_50: '', billetes_20: '', billetes_10: '',
+            monedas_5: '', monedas_2: '', monedas_1: '', monedas_050: '', monedas_020: '', monedas_010: ''
+        });
+    }, [fecha, branchId]);
+
     const handleSearch = async () => {
         if (!branchId || !fecha) return;
         setLoading(true);
         setHasSearched(true);
         setTurnoSeleccionado(null); 
         
+        // ✨ LIMPIAMOS LOS BILLETES AL BUSCAR UN NUEVO DÍA
+        setCashBreakdown({
+            billetes_200: '', billetes_100: '', billetes_50: '', billetes_20: '', billetes_10: '',
+            monedas_5: '', monedas_2: '', monedas_1: '', monedas_050: '', monedas_020: '', monedas_010: ''
+        });
+
         try {
-            // ✨ CONSULTAMOS EL ESTADO DEL CANDADO
             const estadoRes = await verificarEstadoCierre(Number(branchId), fecha);
             setIsClosed(estadoRes.isClosed);
 
@@ -75,7 +119,6 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
                 setKpis(resultFinanzas.kpis); 
                 
                 const turnosRecibidos = resultFinanzas.turnos || [];
-                
                 const turnosEstandar = [
                     { id: '1. Mañana', nombreCompleto: '1. Mañana (06:00 - 12:00)' },
                     { id: '2. Tarde', nombreCompleto: '2. Tarde (12:00 - 18:00)' },
@@ -87,16 +130,8 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
                     const turnoEncontrado = turnosRecibidos.find((t: any) => 
                         String(t.rango_horas).includes(turnoBase.id)
                     );
-
-                    if (turnoEncontrado) {
-                        return turnoEncontrado;
-                    } else {
-                        return {
-                            rango_horas: turnoBase.nombreCompleto,
-                            cantidad_operaciones: 0,
-                            total_generado: 0
-                        };
-                    }
+                    if (turnoEncontrado) return turnoEncontrado;
+                    return { rango_horas: turnoBase.nombreCompleto, cantidad_operaciones: 0, total_generado: 0 };
                 });
 
                 setDatosTurnos(turnosCompletos);
@@ -113,17 +148,22 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
         }
     };
 
-    // ✨ FUNCIÓN PARA ENVIAR Y BLOQUEAR EL DÍA
     const handleEnviarCierre = async () => {
-        if (!confirm("⚠️ ¿Estás seguro de enviar el Cierre Diario?\n\nEsta acción es IRREVERSIBLE. Una vez enviado, no se podrán modificar, agregar ni eliminar ventas, compras o ajustes de almacén para esta fecha.")) {
+        if (!confirm("⚠️ ¿Estás seguro de enviar el Cierre Diario?\n\nEsta acción es IRREVERSIBLE y el día quedará bloqueado.")) {
             return;
         }
         
         setIsSending(true);
-        const res = await enviarCierreDiario(Number(branchId), fecha);
+        const res = await enviarCierreDiario(Number(branchId), fecha, cashBreakdown);
         
         if (res.success) {
-            setIsClosed(true); // Bloqueamos la interfaz
+            setIsClosed(true);
+            setShowCashBreakdown(false);
+            // ✨ LIMPIAMOS LOS BILLETES TRAS ENVIAR EL CIERRE EXITOSAMENTE
+            setCashBreakdown({
+                billetes_200: '', billetes_100: '', billetes_50: '', billetes_20: '', billetes_10: '',
+                monedas_5: '', monedas_2: '', monedas_1: '', monedas_050: '', monedas_020: '', monedas_010: ''
+            });
             alert("✅ " + res.message);
         } else {
             alert("❌ Error: " + res.message);
@@ -132,16 +172,12 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
     };
 
     const COLORS = ['#3b82f6', '#f97316', '#8b5cf6', '#10b981', '#ef4444', '#64748b'];
-
     const getShiftNameOnly = (val: any) => val ? String(val).replace(/^[0-9]+\.\s*/, '').split('(')[0].trim() : "";
     const getShiftFullName = (val: any) => val ? String(val).replace(/^[0-9]+\.\s*/, '').trim() : "";
 
     const toggleDetalle = (turnoNombre: string) => {
-        if (turnoSeleccionado === turnoNombre) {
-            setTurnoSeleccionado(null);
-        } else {
-            setTurnoSeleccionado(turnoNombre);
-        }
+        if (turnoSeleccionado === turnoNombre) setTurnoSeleccionado(null);
+        else setTurnoSeleccionado(turnoNombre);
     };
 
     return (
@@ -173,7 +209,6 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
             {hasSearched && (
                 <div className="mt-8 bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
                     
-                    {/* ✨ BARRA SUPERIOR DE CONTROL DE CIERRE ✨ */}
                     <div className="bg-gray-100 p-4 border-b border-gray-200 flex flex-col sm:flex-row justify-between items-center gap-4">
                         <div>
                             {isClosed ? (
@@ -191,7 +226,7 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
                         </div>
                         
                         <button 
-                            onClick={handleEnviarCierre}
+                            onClick={() => setShowCashBreakdown(true)}
                             disabled={isClosed || isSending || datosPagos.length === 0}
                             className={`flex items-center justify-center gap-2 px-6 py-2.5 rounded-md font-bold transition-all shadow-sm w-full sm:w-auto
                                 ${isClosed ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 
@@ -199,7 +234,7 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
                                   'bg-blue-600 text-white hover:bg-blue-700 hover:shadow-md'}`}
                         >
                             {isClosed ? <Lock className="w-4 h-4" /> : <Send className="w-4 h-4" />}
-                            {isSending ? "Enviando y Bloqueando..." : isClosed ? "Cierre Completado" : "Enviar Cierre Diario Definitivo"}
+                            {isClosed ? "Cierre Completado" : "Enviar Cierre Diario Definitivo"}
                         </button>
                     </div>
 
@@ -351,7 +386,6 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
                         {pestañaActiva === 'turnos' && (
                             <div className="space-y-8 animate-in fade-in duration-300">
                                 
-                                {/* 1. Gráfica de Barras */}
                                 <div className="bg-white border rounded-lg p-5 shadow-sm">
                                     <h2 className="text-lg font-bold text-gray-800 mb-6 flex items-center gap-2">
                                         <TrendingUp className="text-orange-500 w-5 h-5" /> Ingresos por Turno de Trabajo
@@ -382,7 +416,6 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
                                     )}
                                 </div>
 
-                                {/* 2. Lista de Turnos con Botón de "Ver Detalle" */}
                                 <div className="bg-white border rounded-lg shadow-sm overflow-hidden">
                                     <div className="p-5 border-b bg-gray-50">
                                         <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
@@ -450,6 +483,122 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
                                 </div>
                             </div>
                         )}
+                    </div>
+                </div>
+            )}
+
+            {/* ✨ MEGA-MODAL DE DESGLOSE DE EFECTIVO PARA EL CIERRE ✨ */}
+            {showCashBreakdown && (
+                <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full flex flex-col overflow-hidden max-h-[90vh]">
+                        <div className="bg-blue-900 p-5 text-white flex justify-between items-center">
+                            <div>
+                                <h3 className="text-xl font-bold flex items-center gap-2">
+                                    <Wallet className="w-6 h-6" /> Arqueo de Caja Físico
+                                </h3>
+                                <p className="text-sm text-blue-200 mt-1">
+                                    Cuenta los billetes y monedas. El total debe cuadrar exactamente con el sistema.
+                                </p>
+                            </div>
+                            <button onClick={() => setShowCashBreakdown(false)} className="text-blue-200 hover:text-white text-3xl font-light">&times;</button>
+                        </div>
+
+                        <div className="p-6 overflow-y-auto flex-1 bg-gray-50 border-b border-gray-200">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                {/* Columna Billetes */}
+                                <div className="space-y-3">
+                                    <h4 className="font-bold text-gray-700 border-b pb-2 mb-4 uppercase tracking-wider text-sm flex items-center gap-2">
+                                        💵 Billetes
+                                    </h4>
+                                    {[
+                                        { k: 'billetes_200', l: 'S/ 200.00' },
+                                        { k: 'billetes_100', l: 'S/ 100.00' },
+                                        { k: 'billetes_50',  l: 'S/ 50.00' },
+                                        { k: 'billetes_20',  l: 'S/ 20.00' },
+                                        { k: 'billetes_10',  l: 'S/ 10.00' }
+                                    ].map((item) => (
+                                        <div key={item.k} className="flex items-center justify-between bg-white p-3 rounded-lg border border-gray-200 shadow-sm">
+                                            <span className="font-bold text-gray-700">{item.l}</span>
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-xs text-gray-400 font-medium">Cant:</span>
+                                                <input 
+                                                    type="number" min="0" placeholder="0"
+                                                    className="w-20 p-2 border border-gray-300 rounded-md text-right font-bold text-blue-700 focus:ring-2 focus:ring-blue-500"
+                                                    value={(cashBreakdown as any)[item.k]}
+                                                    onChange={e => setCashBreakdown({...cashBreakdown, [item.k]: e.target.value})}
+                                                />
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                {/* Columna Monedas */}
+                                <div className="space-y-3">
+                                    <h4 className="font-bold text-gray-700 border-b pb-2 mb-4 uppercase tracking-wider text-sm flex items-center gap-2">
+                                        🪙 Monedas
+                                    </h4>
+                                    {[
+                                        { k: 'monedas_5',   l: 'S/ 5.00' },
+                                        { k: 'monedas_2',   l: 'S/ 2.00' },
+                                        { k: 'monedas_1',   l: 'S/ 1.00' },
+                                        { k: 'monedas_050', l: 'S/ 0.50' },
+                                        { k: 'monedas_020', l: 'S/ 0.20' },
+                                        { k: 'monedas_010', l: 'S/ 0.10' }
+                                    ].map((item) => (
+                                        <div key={item.k} className="flex items-center justify-between bg-white p-3 rounded-lg border border-gray-200 shadow-sm">
+                                            <span className="font-bold text-gray-700">{item.l}</span>
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-xs text-gray-400 font-medium">Cant:</span>
+                                                <input 
+                                                    type="number" min="0" placeholder="0"
+                                                    className="w-20 p-2 border border-gray-300 rounded-md text-right font-bold text-blue-700 focus:ring-2 focus:ring-blue-500"
+                                                    value={(cashBreakdown as any)[item.k]}
+                                                    onChange={e => setCashBreakdown({...cashBreakdown, [item.k]: e.target.value})}
+                                                />
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* ✨ RESUMEN Y CUADRE FINAL ✨ */}
+                        <div className="p-6 bg-white flex flex-col gap-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                <div className="bg-gray-100 p-4 rounded-xl border border-gray-200 text-center">
+                                    <span className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Esperado en Sistema</span>
+                                    <span className="text-2xl font-black text-gray-800">S/ {totalEfectivoEsperado.toFixed(2)}</span>
+                                </div>
+                                <div className="bg-blue-50 p-4 rounded-xl border border-blue-200 text-center">
+                                    <span className="block text-xs font-bold text-blue-800 uppercase tracking-wider mb-1">Físico Contado</span>
+                                    <span className="text-2xl font-black text-blue-700">S/ {totalFisico.toFixed(2)}</span>
+                                </div>
+                                <div className={`p-4 rounded-xl border text-center ${isCuadrado ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                                    <span className={`block text-xs font-bold uppercase tracking-wider mb-1 ${isCuadrado ? 'text-green-800' : 'text-red-800'}`}>Diferencia</span>
+                                    <span className={`text-2xl font-black ${isCuadrado ? 'text-green-700' : 'text-red-700'}`}>
+                                        {diferenciaEfectivo > 0 ? '+' : ''}S/ {diferenciaEfectivo.toFixed(2)}
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div className="flex justify-end gap-3 mt-2">
+                                <button 
+                                    onClick={() => setShowCashBreakdown(false)}
+                                    className="px-6 py-3 text-gray-600 bg-gray-100 font-bold rounded-xl hover:bg-gray-200 transition-colors"
+                                >
+                                    Cancelar
+                                </button>
+                                <button 
+                                    onClick={handleEnviarCierre}
+                                    disabled={isSending || !isCuadrado}
+                                    className="px-6 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 disabled:opacity-50 disabled:bg-gray-400 shadow-md transition-colors"
+                                    title={!isCuadrado ? "Debes cuadrar la caja a S/ 0.00 para poder cerrar el día" : ""}
+                                >
+                                    {isSending ? 'Enviando...' : (isCuadrado ? 'Confirmar y Cerrar Día' : 'Caja Descuadrada')}
+                                </button>
+                            </div>
+                        </div>
+
                     </div>
                 </div>
             )}

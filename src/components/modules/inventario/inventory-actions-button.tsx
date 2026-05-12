@@ -2,32 +2,31 @@
 
 import { useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { PlusCircle, UploadCloud, Loader2, ArrowRightLeft } from "lucide-react"; // ✨ Agregamos ArrowRightLeft
+import { PlusCircle, UploadCloud, Loader2, ArrowRightLeft } from "lucide-react"; 
 import { ManualEntryDialog } from "./manual-entry-dialog";
-import { TransferStockDialog } from "./transfer-stock-dialog"; // ✨ Importamos el nuevo Modal
+import { TransferStockDialog } from "./transfer-stock-dialog"; 
 import * as XLSX from "xlsx";
 import { procesarAjusteInventarioExcel } from "@/actions/inventory-actions";
 
 interface InventoryActionsButtonProps {
-    branches?: any[]; 
+    branches?: any[]; // En realidad son Warehouses
     userRole?: string;
-    userBranchId?: number;
-    productos?: any[]; // ✨ Recibimos los productos desde la página principal
+    userBranchId?: number; // Warehouse ID
+    productos?: any[]; 
 }
 
 export function InventoryActionsButton({ 
     branches = [], 
     userRole = "", 
     userBranchId,
-    productos = [] // ✨ Inicializamos en vacío por seguridad
+    productos = [] 
 }: InventoryActionsButtonProps) {
     
     const [open, setOpen] = useState(false);
-    const [isTransferModalOpen, setIsTransferModalOpen] = useState(false); // ✨ Estado para el modal de traslado
+    const [isTransferModalOpen, setIsTransferModalOpen] = useState(false); 
     const [isLoading, setIsLoading] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    // Estados para la justificación del Excel
     const [justificationModalOpen, setJustificationModalOpen] = useState(false);
     const [justificationText, setJustificationText] = useState("");
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -35,28 +34,25 @@ export function InventoryActionsButton({
     const rolesPermitidosExcel = ['GERENTE GENERAL', 'GERENTE DE LOGISTICA', 'ADMINISTRADOR GENERAL'];
     const puedeSubirExcel = rolesPermitidosExcel.includes(userRole.toUpperCase());
 
-    const [excelBranchId, setExcelBranchId] = useState<number>(
+    const [excelWarehouseId, setExcelWarehouseId] = useState<number>(
         userBranchId || (branches && branches.length > 0 ? branches[0].id : 0)
     );
 
-    // Paso 1: Atrapamos el archivo pero NO lo procesamos aún
     const handleFileSelection = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
 
-        if (!excelBranchId) {
-            alert("Debes seleccionar una sucursal destino para cargar el inventario.");
+        if (!excelWarehouseId) {
+            alert("Debes seleccionar un almacén destino para cargar el inventario.");
             if (fileInputRef.current) fileInputRef.current.value = "";
             return;
         }
 
-        // Guardamos el archivo en memoria y abrimos el Modal
         setSelectedFile(file);
         setJustificationText("");
         setJustificationModalOpen(true);
     };
 
-    // Paso 2: Procesamos cuando el usuario ingresa el motivo y confirma
     const handleConfirmUpload = () => {
         if (!justificationText.trim()) {
             alert("⚠️ La justificación es obligatoria por motivos de auditoría.");
@@ -79,8 +75,9 @@ export function InventoryActionsButton({
                     return;
                 }
 
+                // ✨ La base de datos asume que esto es el almacén ahora
                 const result = await procesarAjusteInventarioExcel({
-                    branchId: Number(excelBranchId),
+                    branchId: Number(excelWarehouseId),
                     data: data,
                     justificacion: justificationText 
                 });
@@ -120,7 +117,6 @@ export function InventoryActionsButton({
     return (
         <>
             <div className="flex flex-wrap items-center gap-3">
-                {/* BOTÓN 1: AJUSTE MANUAL */}
                 <Button 
                     type="button" 
                     onClick={() => setOpen(true)} 
@@ -130,7 +126,6 @@ export function InventoryActionsButton({
                     Ajuste Manual
                 </Button>
 
-                {/* ✨ BOTÓN 2: TRASLADO ENTRE SUCURSALES ✨ */}
                 <Button 
                     type="button" 
                     onClick={() => setIsTransferModalOpen(true)} 
@@ -140,17 +135,17 @@ export function InventoryActionsButton({
                     Trasladar Stock
                 </Button>
 
-                {/* BOTÓN 3: CARGA EXCEL */}
                 {puedeSubirExcel && (
                     <div className="flex items-center gap-2 bg-purple-50/50 p-1 pr-1.5 pl-2 rounded-lg border border-purple-100 shadow-sm">
                         <span className="text-xs font-semibold text-purple-800">Carga Masiva:</span>
                         
+                        {/* ✨ CAMBIO: Selector de Almacenes */}
                         <select 
-                            value={excelBranchId}
-                            onChange={(e) => setExcelBranchId(Number(e.target.value))}
-                            className="text-xs h-7 rounded border border-purple-200 bg-white text-gray-700 px-2 py-1 outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer max-w-[120px] truncate"
+                            value={excelWarehouseId}
+                            onChange={(e) => setExcelWarehouseId(Number(e.target.value))}
+                            className="text-xs h-7 rounded border border-purple-200 bg-white text-gray-700 px-2 py-1 outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer max-w-[150px] truncate"
                         >
-                            <option value={0} disabled>Elige sede...</option>
+                            <option value={0} disabled>Elige almacén...</option>
                             {branches && branches.map(b => (
                                 <option key={b.id} value={b.id}>{b.name}</option>
                             ))}
@@ -169,7 +164,7 @@ export function InventoryActionsButton({
                             type="button"
                             variant="outline"
                             onClick={() => fileInputRef.current?.click()}
-                            disabled={isLoading || !excelBranchId}
+                            disabled={isLoading || !excelWarehouseId}
                             className="h-7 px-3 text-xs font-bold bg-white text-purple-700 border-purple-200 hover:bg-purple-100 hover:text-purple-800 transition-all disabled:opacity-50"
                         >
                             {isLoading ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <UploadCloud className="w-3.5 h-3.5 mr-1.5" />}
@@ -224,14 +219,13 @@ export function InventoryActionsButton({
                 userBranchId={userBranchId || 0}
             />
 
-            {/* ✨ MODAL DE TRASLADO DE INVENTARIO ✨ */}
             <TransferStockDialog 
                 isOpen={isTransferModalOpen}
                 onOpenChange={setIsTransferModalOpen}
-                sucursalActualId={excelBranchId || userBranchId || 0} 
+                sucursalActualId={excelWarehouseId || userBranchId || 0} 
                 sucursales={branches} 
-                productos={productos} // Le pasamos la data real de la tabla
-                onSuccess={() => window.location.reload()} // Refresca la página al terminar
+                productos={productos}
+                onSuccess={() => window.location.reload()} 
             />
         </>
     );

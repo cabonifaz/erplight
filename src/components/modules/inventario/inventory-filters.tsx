@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
 interface InventoryFiltersProps {
-    branches: { id: number; name: string }[];
+    branches: { id: number; name: string }[]; // En realidad son Almacenes (Warehouses)
     products: { id: number; name: string; code: string }[];
     userBranchId: number;
     userRole: string;
@@ -23,34 +23,28 @@ export function InventoryFilters({ branches, products, userBranchId, userRole }:
     const pathname = usePathname();
     const { replace } = useRouter();
 
-    /// Lógica de Permisos - Agregamos GERENTE DE LOGISTICA al grupo VIP
     const PRIVILEGED_ROLES = ['GERENTE GENERAL', 'GERENTE DE LOGISTICA', 'ADMINISTRADOR GENERAL'];
     const isRestricted = !PRIVILEGED_ROLES.includes(userRole?.toUpperCase() || "");
 
-    // --- ESTADOS LOCALES (No afectan la URL todavía) ---
-    // Inicializamos con lo que venga en la URL o vacío
-    const [branchId, setBranchId] = useState(searchParams.get("branchId") || "");
+    // ✨ CAMBIADO a warehouseId
+    const [warehouseId, setWarehouseId] = useState(searchParams.get("warehouseId") || "");
     const [query, setQuery] = useState(searchParams.get("query") || "");
     const [minStock, setMinStock] = useState(searchParams.get("minStock") || "");
     const [maxStock, setMaxStock] = useState(searchParams.get("maxStock") || "");
     const [dateFrom, setDateFrom] = useState(searchParams.get("dateFrom") || "");
 
-    // Estado para el Combobox de Productos
     const [openProduct, setOpenProduct] = useState(false);
     
-    // Efecto: Pre-seleccionar sucursal si es la primera vez o si está restringido
     useEffect(() => {
-        // Si la URL no tiene sucursal y el usuario tiene una asignada...
-        if (!searchParams.get("branchId") && userBranchId) {
-            setBranchId(userBranchId.toString());
+        if (!searchParams.get("warehouseId") && userBranchId) {
+            setWarehouseId(userBranchId.toString());
         }
     }, [userBranchId, searchParams]);
 
-    // --- ACCIÓN: APLICAR FILTROS (Actualiza la URL) ---
     const applyFilters = () => {
         const params = new URLSearchParams();
         
-        if (branchId && branchId !== "ALL") params.set("branchId", branchId);
+        if (warehouseId && warehouseId !== "ALL") params.set("warehouseId", warehouseId);
         if (query) params.set("query", query);
         if (minStock) params.set("minStock", minStock);
         if (maxStock) params.set("maxStock", maxStock);
@@ -59,25 +53,22 @@ export function InventoryFilters({ branches, products, userBranchId, userRole }:
         replace(`${pathname}?${params.toString()}`);
     };
 
-    // --- ACCIÓN: LIMPIAR TODO ---
     const clearFilters = () => {
-    setQuery("");
-    setMinStock("");
-    setMaxStock("");
-    setDateFrom("");
-    
-    if (!isRestricted) {
-        // Si eres gerente, al limpiar ves TODO
-        setBranchId("ALL"); 
-        replace(pathname);
-    } else {
-        // Si eres restringido, te mantiene en tu sucursal
-        setBranchId(userBranchId.toString());
-        const params = new URLSearchParams();
-        params.set("branchId", userBranchId.toString());
-        replace(`${pathname}?${params.toString()}`);
-    }
-};
+        setQuery("");
+        setMinStock("");
+        setMaxStock("");
+        setDateFrom("");
+        
+        if (!isRestricted) {
+            setWarehouseId("ALL"); 
+            replace(pathname);
+        } else {
+            setWarehouseId(userBranchId.toString());
+            const params = new URLSearchParams();
+            params.set("warehouseId", userBranchId.toString());
+            replace(`${pathname}?${params.toString()}`);
+        }
+    };
 
     return (
         <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm space-y-4">
@@ -88,38 +79,34 @@ export function InventoryFilters({ branches, products, userBranchId, userRole }:
             
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
                 
-                {/* 1. SUCURSAL */}
-                {/* 1. SUCURSAL */}
-<div className="space-y-1">
-    <Label className="text-xs text-gray-500">Sucursal</Label>
-    <div className="relative">
-        <Select 
-            value={branchId}
-            onValueChange={setBranchId}
-            // 🔓 Se desbloquea si eres Gerente
-            disabled={isRestricted} 
-        >
-            <SelectTrigger className={cn(
-                "h-8 text-xs bg-gray-50", 
-                isRestricted && "opacity-80 bg-gray-100 cursor-not-allowed"
-            )}>
-                <SelectValue placeholder="Seleccionar sucursal" />
-            </SelectTrigger>
-            <SelectContent>
-                {/* 🌍 Solo el Gerente ve la opción de "Todas las sedes" */}
-                {!isRestricted && (
-                    <SelectItem value="ALL">Todas las sedes</SelectItem>
-                )}
-                
-                {branches.map(b => (
-                    <SelectItem key={b.id} value={b.id.toString()}>{b.name}</SelectItem>
-                ))}
-            </SelectContent>
-        </Select>
-        {/* 🔒 El candado solo aparece si está restringido */}
-        {isRestricted && <Lock className="w-3 h-3 text-gray-400 absolute right-8 top-2.5" />}
-    </div>
-</div>
+                {/* 1. ALMACÉN ✨ */}
+                <div className="space-y-1">
+                    <Label className="text-xs text-gray-500">Almacén Físico</Label>
+                    <div className="relative">
+                        <Select 
+                            value={warehouseId}
+                            onValueChange={setWarehouseId}
+                            disabled={isRestricted} 
+                        >
+                            <SelectTrigger className={cn(
+                                "h-8 text-xs bg-gray-50", 
+                                isRestricted && "opacity-80 bg-gray-100 cursor-not-allowed"
+                            )}>
+                                <SelectValue placeholder="Seleccionar almacén" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {!isRestricted && (
+                                    <SelectItem value="ALL">Todos los almacenes</SelectItem>
+                                )}
+                                
+                                {branches.map(w => (
+                                    <SelectItem key={w.id} value={w.id.toString()}>{w.name}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                        {isRestricted && <Lock className="w-3 h-3 text-gray-400 absolute right-8 top-2.5" />}
+                    </div>
+                </div>
 
                 {/* 2. PRODUCTO (COMBOBOX) */}
                 <div className="space-y-1 lg:col-span-1">
@@ -145,9 +132,9 @@ export function InventoryFilters({ branches, products, userBranchId, userRole }:
                                         {products.slice(0, 50).map((product) => (
                                             <CommandItem
                                                 key={product.id}
-                                                value={product.name} // Se usa para filtrar dentro del command
+                                                value={product.name}
                                                 onSelect={(currentValue) => {
-                                                    setQuery(product.name); // Guardamos el nombre en el estado local
+                                                    setQuery(product.name);
                                                     setOpenProduct(false);
                                                 }}
                                                 className="text-xs"

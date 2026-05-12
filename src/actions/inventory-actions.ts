@@ -270,3 +270,21 @@ export async function transferirStockSucursal(data: {
         connection.release();
     }
 }
+
+export async function buscarProductoEnAlmacen(warehouseId: number, searchTerm: string) {
+    const connection = await pool.getConnection();
+    try {
+        const [rows]: any = await connection.query(`
+            SELECT p.id as product_id, p.name as product_name, p.code as product_code, p.unit_measure
+            FROM product_stocks ps
+            JOIN products p ON ps.product_id = p.id
+            WHERE ps.warehouse_id = ? AND (p.name LIKE ? OR p.code LIKE ?)
+            ORDER BY p.name ASC LIMIT 15
+        `, [warehouseId, `%${searchTerm}%`, `%${searchTerm}%`]);
+        return { success: true, data: rows };
+    } catch (error: any) {
+        return { success: false, data: [] };
+    } finally {
+        connection.release();
+    }
+}

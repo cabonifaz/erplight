@@ -9,8 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Loader2, Save, Search, ArrowRightLeft, Lock } from "lucide-react";
 import { toast } from "sonner";
-import { registerManualAdjustment } from "@/actions/inventory-actions";
-import { getProductsSearch } from "@/actions/purchase-actions"; 
+import { registerManualAdjustment, buscarProductoEnAlmacen } from "@/actions/inventory-actions"; // ✨ IMPORTAMOS EL NUEVO BUSCADOR
 
 interface ManualEntryDialogProps {
     open: boolean;
@@ -23,87 +22,79 @@ interface ManualEntryDialogProps {
 export function ManualEntryDialog({ open, onOpenChange, branches, userRole, userBranchId }: ManualEntryDialogProps) {
     const [loading, setLoading] = useState(false);
     
-   // 1. Definir roles privilegiados (pueden cambiar de sucursal)
-// Añadimos 'GERENTE GENERAL' a la lista
-const PRIVILEGED_ROLES = ['CEO', 'LOGISTICA', 'ADMINISTRADOR GENERAL', 'GERENTE GENERAL'];
-const canChangeBranch = PRIVILEGED_ROLES.includes(userRole);
+    const PRIVILEGED_ROLES = ['CEO', 'LOGISTICA', 'ADMINISTRADOR GENERAL', 'GERENTE GENERAL'];
+    const canChangeBranch = PRIVILEGED_ROLES.includes(userRole);
 
-    // 2. Estados del Formulario
-    const [branchId, setBranchId] = useState("");
+    const [branchId, setBranchId] = useState(""); 
     const [type, setType] = useState("INGRESO"); 
     const [quantity, setQuantity] = useState(1);
     const [reason, setReason] = useState("");
     
-    // 3. Estados del Buscador
     const [searchTerm, setSearchTerm] = useState("");
     const [selectedProduct, setSelectedProduct] = useState<any>(null);
     const [searchResults, setSearchResults] = useState<any[]>([]);
     const [isSearching, setIsSearching] = useState(false);
 
-    // 4. EFECTO DE INICIALIZACIÓN (Clave para la sucursal automática)
-    // 4. EFECTO DE INICIALIZACIÓN
     useEffect(() => {
         if (open) {
-            // Resetear campos
             setReason("");
             setQuantity(1);
             setSearchTerm("");
             setSelectedProduct(null);
             setType("INGRESO");
 
-            // LÓGICA MEJORADA:
-            // Si el usuario tiene una sucursal (sea Jefe o Almacenero), la pre-seleccionamos.
             if (userBranchId && userBranchId > 0) {
                 setBranchId(userBranchId.toString());
             } else {
-                setBranchId(""); // Si no tiene sucursal (ej. Admin Global sin sede), inicia vacío.
+                setBranchId(""); 
             }
         }
-    }, [open, userBranchId]); // Quitamos 'canChangeBranch' de las dependencias para simplificar
+    }, [open, userBranchId]); 
 
-    // 5. Lógica del Buscador (Debounce)
+    // ✨ BUSCADOR SEGURO CONTRA LA BASE DE DATOS (Con protección contra bucles infinitos)
     useEffect(() => {
-        const timer = setTimeout(async () => {
-            if (searchTerm.length > 1) {
+        const fetchResults = async () => {
+            if (searchTerm.length > 1 && !selectedProduct && branchId) {
                 setIsSearching(true);
-                const results = await getProductsSearch(searchTerm);
-                setSearchResults(results);
+                const res = await buscarProductoEnAlmacen(Number(branchId), searchTerm);
+                if (res.success) {
+                    setSearchResults(res.data);
+                } else {
+                    setSearchResults([]);
+                }
                 setIsSearching(false);
             } else {
                 setSearchResults([]);
             }
-        }, 300);
+        };
+
+        const timer = setTimeout(() => {
+            fetchResults();
+        }, 300); // Espera 300ms después de que dejas de escribir para no saturar la BD
+
         return () => clearTimeout(timer);
-    }, [searchTerm]);
+    }, [searchTerm, branchId, selectedProduct]);
 
     const handleSelectProduct = (prod: any) => {
-        setSelectedProduct(prod);
-        setSearchTerm(prod.name);
+        setSelectedProduct({
+            id: prod.product_id,
+            name: prod.product_name,
+            code: prod.product_code,
+            unit_measure: prod.unit_measure
+        });
+        setSearchTerm(prod.product_name);
         setSearchResults([]); 
     };
 
     const handleSubmit = async () => {
-        // Validaciones
-        if (!branchId) {
-            toast.error("La sucursal es obligatoria.");
-            return;
-        }
-        if (!selectedProduct) {
-            toast.error("Debes buscar y seleccionar un producto.");
-            return;
-        }
-        if (quantity <= 0) {
-            toast.error("La cantidad debe ser mayor a 0.");
-            return;
-        }
-        if (!reason.trim()) {
-            toast.error("Debes indicar un motivo.");
-            return;
-        }
+        if (!branchId) return toast.error("El almacén es obligatorio.");
+        if (!selectedProduct) return toast.error("Debes buscar y seleccionar un producto.");
+        if (quantity <= 0) return toast.error("La cantidad debe ser mayor a 0.");
+        if (!reason.trim()) return toast.error("Debes indicar un motivo.");
 
         setLoading(true);
         const formData = new FormData();
-        formData.append("branch_id", branchId);
+        formData.append("branch_id", branchId); // Manda el warehouseId real
         formData.append("product_id", selectedProduct.id.toString());
         formData.append("quantity", quantity.toString());
         formData.append("type", type);
@@ -115,6 +106,7 @@ const canChangeBranch = PRIVILEGED_ROLES.includes(userRole);
         if (res.success) {
             toast.success(res.message);
             onOpenChange(false);
+            window.location.reload(); 
         } else {
             toast.error(res.message);
         }
@@ -122,32 +114,35 @@ const canChangeBranch = PRIVILEGED_ROLES.includes(userRole);
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="sm:max-w-md">
+            <DialogContent className="sm:max-w-md overflow-visible">
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2 text-gray-800">
                         <ArrowRightLeft className="w-5 h-5" /> Ajuste Manual de Stock
                     </DialogTitle>
                     <DialogDescription>
                         {canChangeBranch 
-                            ? "Selecciona la sucursal y registra el movimiento."
-                            : "Registrando movimiento en tu sucursal asignada."}
+                            ? "Selecciona el almacén y registra el movimiento."
+                            : "Registrando movimiento en tu almacén asignado."}
                     </DialogDescription>
                 </DialogHeader>
 
                 <div className="space-y-4 py-2">
-                    {/* Fila 1: Sucursal y Tipo */}
                     <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">
-                            <Label>Sucursal</Label>
+                            <Label>Almacén Físico</Label>
                             <div className="relative">
                                 <Select 
                                     value={branchId} 
-                                    onValueChange={setBranchId} 
-                                    disabled={!canChangeBranch} // Bloqueado si no es jefe
+                                    onValueChange={(val) => {
+                                        setBranchId(val);
+                                        setSearchTerm(""); 
+                                        setSelectedProduct(null);
+                                    }} 
+                                    disabled={!canChangeBranch}
                                 >
                                     <SelectTrigger className={!canChangeBranch ? "bg-gray-100 text-gray-600 font-medium opacity-100" : "bg-white"}>
-    <SelectValue placeholder={canChangeBranch ? "Seleccionar Sucursal" : "Cargando..."} />
-</SelectTrigger>
+                                        <SelectValue placeholder={canChangeBranch ? "Seleccionar Almacén" : "Cargando..."} />
+                                    </SelectTrigger>
                                     <SelectContent>
                                         {branches.map(b => (
                                             <SelectItem key={b.id} value={b.id.toString()}>{b.name}</SelectItem>
@@ -158,9 +153,6 @@ const canChangeBranch = PRIVILEGED_ROLES.includes(userRole);
                                     <Lock className="w-3 h-3 text-gray-400 absolute right-8 top-3" />
                                 )}
                             </div>
-                            {!canChangeBranch && !branchId && (
-                                <p className="text-[10px] text-red-500 mt-1 font-medium">⚠ Tu usuario no tiene sucursal.</p>
-                            )}
                         </div>
                         
                         <div className="space-y-2">
@@ -177,18 +169,18 @@ const canChangeBranch = PRIVILEGED_ROLES.includes(userRole);
                         </div>
                     </div>
 
-                    {/* Fila 2: Buscador Producto */}
                     <div className="space-y-2 relative">
                         <Label>Producto</Label>
                         <div className="relative">
                             <Input 
-                                placeholder="Buscar por nombre o código..." 
+                                placeholder="Buscar en este almacén..." 
                                 value={searchTerm} 
                                 onChange={e => { setSearchTerm(e.target.value); if(!e.target.value) setSelectedProduct(null); }}
                                 className={selectedProduct ? "border-green-500 bg-green-50 text-green-700 font-medium pl-8" : "pl-8"}
+                                disabled={!branchId}
                             />
                             {isSearching ? (
-                                <Loader2 className="absolute left-2.5 top-2.5 h-4 w-4 animate-spin text-gray-400" />
+                                <Loader2 className="absolute left-2.5 top-2.5 h-4 w-4 text-blue-500 animate-spin" />
                             ) : (
                                 <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-400" />
                             )}
@@ -196,25 +188,29 @@ const canChangeBranch = PRIVILEGED_ROLES.includes(userRole);
                         
                         {/* Resultados del buscador */}
                         {searchResults.length > 0 && !selectedProduct && (
-                            <div className="absolute top-full left-0 w-full bg-white border rounded-md shadow-lg z-50 max-h-48 overflow-y-auto mt-1">
+                            <div className="absolute top-full left-0 w-full bg-white border rounded-md shadow-lg z-[100] max-h-48 overflow-y-auto mt-1">
                                 {searchResults.map(prod => (
                                     <div 
-                                        key={prod.id} 
+                                        key={prod.product_id} 
                                         className="p-2 hover:bg-blue-50 cursor-pointer text-sm border-b last:border-0"
                                         onClick={() => handleSelectProduct(prod)}
                                     >
-                                        <div className="font-bold text-gray-700">{prod.name}</div>
+                                        <div className="font-bold text-gray-700">{prod.product_name}</div>
                                         <div className="text-xs text-gray-400 flex justify-between">
-                                            <span>{prod.code}</span>
+                                            <span>{prod.product_code}</span>
                                             <span>{prod.unit_measure}</span>
                                         </div>
                                     </div>
                                 ))}
                             </div>
                         )}
+                        {searchTerm.length > 1 && searchResults.length === 0 && !selectedProduct && !isSearching && branchId && (
+                            <div className="absolute top-full left-0 w-full bg-white border rounded-md shadow-lg z-[100] p-3 text-center text-xs text-red-500 mt-1">
+                                El producto no existe en este almacén.
+                            </div>
+                        )}
                     </div>
 
-                    {/* Fila 3: Cantidad */}
                     <div className="space-y-2">
                         <Label>Cantidad ({selectedProduct?.unit_measure || 'UND'})</Label>
                         <Input 
@@ -226,7 +222,6 @@ const canChangeBranch = PRIVILEGED_ROLES.includes(userRole);
                         />
                     </div>
 
-                    {/* Fila 4: Motivo */}
                     <div className="space-y-2">
                         <Label>Motivo / Observación</Label>
                         <Textarea 

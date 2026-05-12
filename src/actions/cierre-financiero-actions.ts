@@ -49,13 +49,20 @@ export async function verificarEstadoCierre(branchId: number, fecha: string) {
 }
 
 // Ejecuta el cierre definitivo
-export async function enviarCierreDiario(branchId: number, fecha: string) {
+export async function enviarCierreDiario(branchId: number, fecha: string, cashBreakdown?: any) {
     const session = await auth();
     if (!session?.user?.id) return { success: false, message: "No autorizado" };
 
     const connection = await pool.getConnection();
     try {
-        const [rows]: any = await connection.query("CALL sp_enviar_cierre_diario(?, ?, ?)", [branchId, fecha, session.user.id]);
+        // ✨ Convertimos el objeto a un string JSON seguro para MySQL
+        const breakdownString = cashBreakdown ? JSON.stringify(cashBreakdown) : null;
+
+        // ✨ Agregamos el cuarto parámetro a la llamada del SP
+        const [rows]: any = await connection.query(
+            "CALL sp_enviar_cierre_diario(?, ?, ?, ?)", 
+            [branchId, fecha, session.user.id, breakdownString]
+        );
         const result = rows[0][0];
         
         return { success: result.success === 1, message: result.message };
