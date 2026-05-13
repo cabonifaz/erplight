@@ -250,206 +250,128 @@ export async function getUnitMeasures() {
 
 // ==============================================================================
 
-
-
 export async function createPurchaseRequest(prevState: ActionState | null, formData: FormData): Promise<ActionState> {
-
   const session = await auth();
-
   if (!session?.user?.id) return { success: false, message: "Sesión expirada" };
-
   const userId = session.user.id;
-
  
-
-  const branch_id = formData.get("branch_id");
-
+  // ✨ CAMBIAMOS branch_id POR warehouse_id
+  const warehouse_id = formData.get("warehouse_id");
   const description = formData.get("description");
-
   const estimated_total = formData.get("estimated_total");
-
   const currency = formData.get("currency") || 'PEN';
-
   const issue_date = formData.get("issue_date") || new Date().toISOString().split('T')[0];
-
   const files = formData.getAll("quotations") as File[];
 
-
-
-  if (!branch_id || !description || !estimated_total) return { success: false, message: "Faltan campos" };
-
-
+  if (!warehouse_id || !description || !estimated_total) return { success: false, message: "Faltan campos" };
 
   const connection = await pool.getConnection();
-
   try {
-
     await connection.beginTransaction();
+    
+    // ✨ 1. BUSCAMOS A QUÉ SUCURSAL PERTENECE ESTE ALMACÉN
+    const [branchRes]: any = await connection.query("SELECT branch_id FROM warehouses WHERE id = ?", [warehouse_id]);
+    const branch_id = branchRes[0]?.branch_id;
 
-   
+    if (!branch_id) throw new Error("El almacén seleccionado no es válido.");
 
-    // ✨ LIMPIO: Sin variables SQL, el SP devuelve el ID directamente
-
+    // ✨ 2. USAMOS TU SP ORIGINAL (Para no romper compatibilidad)
     const [rows]: any = await connection.query(
-
         "CALL sp_crear_solicitud(?, ?, ?, ?, ?, ?)",
-
         [branch_id, userId, issue_date, description, estimated_total, currency]
-
     );
-
     const newRequestId = rows[0][0]?.id;
-
     if (!newRequestId) throw new Error("Error ID solicitud");
 
-
+    // ✨ 3. INYECTAMOS EL ALMACÉN EXACTO A LA SOLICITUD CREADA
+    await connection.query("UPDATE purchase_requests SET warehouse_id = ? WHERE id = ?", [warehouse_id, newRequestId]);
 
     if (files && files.length > 0) {
-
         const uploadDir = join(process.cwd(), "public/uploads");
-
         try { await mkdir(uploadDir, { recursive: true }); } catch (err) {}
 
-
-
         for (const file of files) {
-
             if (file.size > 0) {
-
                 const bytes = await file.arrayBuffer();
-
                 const fileName = `${Date.now()}-${file.name.replace(/\s/g, '_')}`;
-
                 const filePath = join(uploadDir, fileName);
-
                 await writeFile(filePath, Buffer.from(bytes));
-
                 const publicUrl = `/uploads/${fileName}`;
-
                 await connection.query("CALL sp_insertar_cotizacion(?, ?, ?)", [newRequestId, file.name, publicUrl]);
-
             }
-
         }
-
     }
 
-
-
     await connection.commit();
-
     revalidatePath("/compras/solicitudes");
-
     return { success: true, message: "Solicitud registrada" };
-
   } catch (error: any) {
-
     await connection.rollback();
-
     return { success: false, message: error.message };
-
   } finally { connection.release(); }
-
 }
 
 
-
 export async function updatePurchaseRequest(prevState: ActionState | null, formData: FormData): Promise<ActionState> {
-
   const session = await auth();
-
   if (!session?.user?.id) return { success: false, message: "No autorizado" };
 
-
-
   const requestId = formData.get("request_id");
-
-  const branch_id = formData.get("branch_id");
-
+  // ✨ CAMBIAMOS branch_id POR warehouse_id
+  const warehouse_id = formData.get("warehouse_id");
   const description = formData.get("description");
-
   const estimated_total = formData.get("estimated_total");
-
   const currency = formData.get("currency");
-
   const newFiles = formData.getAll("quotations") as File[];
-
   const deletedFileIds = formData.getAll("deleted_file_ids").map(id => Number(id));
 
-
+  if (!warehouse_id || !description || !estimated_total) return { success: false, message: "Faltan campos" };
 
   const connection = await pool.getConnection();
-
   try {
-
     await connection.beginTransaction();
 
+    // ✨ 1. BUSCAMOS LA SUCURSAL
+    const [branchRes]: any = await connection.query("SELECT branch_id FROM warehouses WHERE id = ?", [warehouse_id]);
+    const branch_id = branchRes[0]?.branch_id;
+
+    // ✨ 2. ACTUALIZAMOS USANDO TU SP ORIGINAL
     await connection.query("CALL sp_actualizar_solicitud(?, ?, ?, ?, ?)", [requestId, branch_id, description, estimated_total, currency]);
 
-
+    // ✨ 3. ACTUALIZAMOS EL ALMACÉN ESPECÍFICO
+    await connection.query("UPDATE purchase_requests SET warehouse_id = ? WHERE id = ?", [warehouse_id, requestId]);
 
     if (deletedFileIds.length > 0) {
-
         const [filesToDelete]: any = await connection.query(`CALL sp_obtener_rutas_cotizaciones(?)`, [deletedFileIds.join(',')]);
-
         await connection.query(`CALL sp_eliminar_cotizaciones(?)`, [deletedFileIds.join(',')]);
-
-       
-
+        
         for (const f of filesToDelete[0]) {
-
             try { await unlink(join(process.cwd(), "public", f.file_path)); } catch (e) {}
-
         }
-
     }
-
-
 
     if (newFiles.length > 0) {
-
         const uploadDir = join(process.cwd(), "public/uploads");
-
         try { await mkdir(uploadDir, { recursive: true }); } catch (e) {}
-
         for (const file of newFiles) {
-
             if (file.size > 0) {
-
                 const bytes = await file.arrayBuffer();
-
                 const fileName = `${Date.now()}-${file.name.replace(/\s/g, '_')}`;
-
                 const filePath = join(uploadDir, fileName);
-
                 await writeFile(filePath, Buffer.from(bytes));
-
                 const publicUrl = `/uploads/${fileName}`;
-
                await connection.query("CALL sp_insertar_cotizacion(?, ?, ?)", [requestId, file.name, publicUrl]);
-
             }
-
         }
-
     }
 
-
-
     await connection.commit();
-
     revalidatePath("/compras/solicitudes");
-
     return { success: true, message: "Solicitud actualizada" };
-
   } catch (error: any) {
-
     await connection.rollback();
-
     return { success: false, message: error.sqlMessage || error.message };
-
   } finally { connection.release(); }
-
 }
 
 
