@@ -94,15 +94,15 @@ export function InventoryFilters({ branches, products, userBranchId, userRole }:
                             )}>
                                 <SelectValue placeholder="Seleccionar almacén" />
                             </SelectTrigger>
-                            <SelectContent>
-                                {!isRestricted && (
-                                    <SelectItem value="ALL">Todos los almacenes</SelectItem>
-                                )}
-                                
-                                {branches.map(w => (
-                                    <SelectItem key={w.id} value={w.id.toString()}>{w.name}</SelectItem>
-                                ))}
-                            </SelectContent>
+                           <SelectContent position="popper" className="max-h-[300px] overflow-y-auto">
+    {!isRestricted && (
+        <SelectItem value="ALL">Todos los almacenes</SelectItem>
+    )}
+    
+    {branches.map(w => (
+        <SelectItem key={w.id} value={w.id.toString()}>{w.name}</SelectItem>
+    ))}
+</SelectContent>
                         </Select>
                         {isRestricted && <Lock className="w-3 h-3 text-gray-400 absolute right-8 top-2.5" />}
                     </div>

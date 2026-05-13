@@ -2,13 +2,14 @@
 
 import { useState, useEffect } from "react";
 import { getPurchaseRequests, obtenerReporteCompras, obtenerPrediccionCompras } from "@/actions/purchase-actions";
+import { obtenerAlmacenesPermitidosGlobal } from "@/actions/almacen-actions"; // ✨ NUEVO IMPORT
 import { RequestFormSheet } from "@/components/modules/compras/request-form-sheet";
 import { PurchaseRequestActions } from "@/components/modules/compras/purchase-request-actions"; 
 import { PurchaseRequestFilters } from "@/components/modules/compras/purchase-request-filters";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { ShoppingCart, Calendar, MapPin, User, FileText, MessageSquare, TrendingUp, BarChart3, Building2, AlertCircle, CheckCircle2, RefreshCw } from "lucide-react";
+import { ShoppingCart, Calendar, User, FileText, MessageSquare, TrendingUp, BarChart3, AlertCircle, CheckCircle2, RefreshCw, Package } from "lucide-react";
 
 const money = (amount: number, currency: string = 'PEN') => {
     return new Intl.NumberFormat('es-PE', { style: 'currency', currency: currency }).format(amount);
@@ -52,15 +53,9 @@ export default function PurchaseRequestsClient({
     const [activeTab, setActiveTab] = useState('solicitudes');
     const [requests, setRequests] = useState(initialRequests);
 
-    // SEGURIDAD: Lógica de Sucursales Permitidas
-    const PRIVILEGED_ROLES = ["GERENTE GENERAL", "ADMINISTRADOR GENERAL", "LOGISTICA", "GERENTE DE LOGISTICA", "CEO"];
-    const isVIP = PRIVILEGED_ROLES.includes(userRole?.toUpperCase().trim());
-    
-    const sucursalesPermitidas = isVIP ? branches : branches.filter(b => b.id === userBranchId);
-
-    const [selectedBranchId, setSelectedBranchId] = useState<number>(
-        userBranchId || (sucursalesPermitidas.length > 0 ? sucursalesPermitidas[0].id : 1)
-    );
+    // ✨ AHORA USAMOS ALMACENES EN LUGAR DE SUCURSALES
+    const [almacenes, setAlmacenes] = useState<any[]>([]);
+    const [selectedWarehouseId, setSelectedWarehouseId] = useState<number>(0);
 
     const [datosPrediccion, setDatosPrediccion] = useState<any[]>([]);
     const [cargandoPrediccion, setCargandoPrediccion] = useState(false);
@@ -74,42 +69,59 @@ export default function PurchaseRequestsClient({
         setRequests(initialRequests);
     }, [initialRequests]);
 
+    // ✨ CARGAMOS LOS ALMACENES PERMITIDOS AL INICIAR
+    useEffect(() => {
+        obtenerAlmacenesPermitidosGlobal().then(res => {
+            if (res.success && res.data.length > 0) {
+                setAlmacenes(res.data);
+                setSelectedWarehouseId(res.data[0].id);
+            }
+        });
+    }, []);
+
     const loadData = async (filtros: any) => {
         const data = await getPurchaseRequests(filtros);
         setRequests(data);
     };
 
     const handleGenerarPrediccion = async () => {
+        if (!selectedWarehouseId) return;
         setCargandoPrediccion(true);
-        const res = await obtenerPrediccionCompras(selectedBranchId); 
+        // ✨ AHORA ENVÍA EL ID DEL ALMACÉN FÍSICO AL BACKEND
+        const res = await obtenerPrediccionCompras(selectedWarehouseId); 
         if (res.success) setDatosPrediccion(res.data);
         else alert("Error al analizar el inventario.");
         setCargandoPrediccion(false);
     };
 
     const handleGenerarReporte = async () => {
+        if (!selectedWarehouseId) return;
         setCargandoReporte(true);
-        const res = await obtenerReporteCompras(selectedBranchId, reporteInicio, reporteFin); 
+        // ✨ AHORA ENVÍA EL ID DEL ALMACÉN FÍSICO AL BACKEND
+        const res = await obtenerReporteCompras(selectedWarehouseId, reporteInicio, reporteFin); 
         if (res.success) setDatosReporte(res.data);
         else alert("Error al generar el reporte.");
         setCargandoReporte(false);
     };
 
-    const BranchSelector = () => (
+    const WarehouseSelector = () => (
         <div className="flex items-center gap-3 bg-white px-4 py-2 rounded-lg border border-gray-200 shadow-sm w-full sm:w-auto">
-            <Building2 className="w-4 h-4 text-gray-500 shrink-0" />
-            <span className="text-sm font-semibold text-gray-700 hidden md:inline">Sucursal:</span>
+            <Package className="w-4 h-4 text-gray-500 shrink-0" />
+            <span className="text-sm font-semibold text-gray-700 hidden md:inline">Almacén:</span>
             <select 
-                className="bg-transparent text-sm font-bold text-slate-800 outline-none cursor-pointer w-full"
-                value={selectedBranchId}
-                onChange={(e) => setSelectedBranchId(Number(e.target.value))}
+                className="bg-transparent text-sm font-bold text-slate-800 outline-none cursor-pointer w-full max-w-[250px] truncate"
+                value={selectedWarehouseId}
+                onChange={(e) => setSelectedWarehouseId(Number(e.target.value))}
             >
-                {sucursalesPermitidas.map(b => (
-                    <option key={b.id} value={b.id}>{b.name}</option>
+                {almacenes.map(w => (
+                    <option key={w.id} value={w.id}>{w.name} | {w.branch_name}</option>
                 ))}
             </select>
         </div>
     );
+
+    const PRIVILEGED_ROLES = ["GERENTE GENERAL", "ADMINISTRADOR GENERAL", "LOGISTICA", "GERENTE DE LOGISTICA", "CEO"];
+    const isVIP = PRIVILEGED_ROLES.includes(userRole?.toUpperCase().trim());
 
     return (
       <div className="space-y-8 p-1 md:p-2">
@@ -136,9 +148,10 @@ export default function PurchaseRequestsClient({
 
         {activeTab === 'solicitudes' && (
             <>
+                {/* Nota: Le pasamos los almacenes a los filtros para que el dropdown de filtrado también use almacenes */}
                 <PurchaseRequestFilters 
                     onFilterChange={loadData} 
-                    branches={branches} 
+                    branches={almacenes} 
                     availableRequests={initialRequests} 
                     userRole={userRole} 
                 />
@@ -162,7 +175,8 @@ export default function PurchaseRequestsClient({
                             <TableRow className="bg-gray-50 hover:bg-gray-50 border-b border-gray-100">
                             <TableHead className="w-[100px] pl-6">Código</TableHead>
                             <TableHead className="w-[140px]">Fecha</TableHead>
-                            <TableHead>Sucursal / Solicitante</TableHead>
+                            {/* ✨ ACTUALIZADO: Dice Almacén */}
+                            <TableHead>Almacén / Solicitante</TableHead>
                             <TableHead className="w-[30%]">Descripción</TableHead>
                             <TableHead className="text-right">Monto Est.</TableHead>
                             <TableHead className="text-center">Estado</TableHead>
@@ -171,7 +185,6 @@ export default function PurchaseRequestsClient({
                         </TableHeader>
                         <TableBody>
                             {requests.map((req: any) => {
-                                // SEGURIDAD: Comprobamos si puede editar
                                 const esPropietario = req.user_id === userId || req.requester_id === userId; 
                                 const puedeEditar = isVIP || esPropietario;
 
@@ -190,8 +203,12 @@ export default function PurchaseRequestsClient({
                                         
                                         <TableCell>
                                         <div className="flex flex-col gap-1">
+                                            {/* ✨ ACTUALIZADO: Muestra el nombre del almacén */}
                                             <span className="font-semibold text-gray-800 text-xs flex items-center gap-1">
-                                                <MapPin className="w-3 h-3 text-blue-500" /> {req.branch_name}
+                                                <Package className="w-3 h-3 text-blue-500 shrink-0" /> 
+                                                <span className="truncate max-w-[200px]" title={req.warehouse_name || req.branch_name}>
+                                                    {req.warehouse_name || req.branch_name}
+                                                </span>
                                             </span>
                                             <span className="text-xs text-gray-500 flex items-center gap-1 ml-4">
                                                 <User className="w-3 h-3" /> {req.requester_name}
@@ -232,7 +249,6 @@ export default function PurchaseRequestsClient({
                                         </TableCell>
 
                                         <TableCell className="text-right pr-6">
-                                        {/* ✨ ESTO SOLUCIONA TU ERROR ROJO AL COMBINARSE CON EL ARCHIVO DE ABAJO */}
                                         <PurchaseRequestActions 
                                             request={req} 
                                             userRole={userRole} 
@@ -279,10 +295,10 @@ export default function PurchaseRequestsClient({
                     </div>
                     
                     <div className="flex flex-col sm:flex-row items-center gap-4 w-full md:w-auto">
-                        <BranchSelector />
+                        <WarehouseSelector />
                         <button 
                             onClick={handleGenerarPrediccion} 
-                            disabled={cargandoPrediccion} 
+                            disabled={cargandoPrediccion || !selectedWarehouseId} 
                             className="w-full sm:w-auto bg-blue-600 text-white px-6 py-2.5 rounded-lg font-semibold hover:bg-blue-700 shadow-sm transition-all disabled:opacity-50 flex items-center justify-center gap-2"
                         >
                             <RefreshCw className={`w-4 h-4 ${cargandoPrediccion ? 'animate-spin' : ''}`} />
@@ -307,7 +323,7 @@ export default function PurchaseRequestsClient({
                                 </TableHeader>
                                 <TableBody>
                                     {datosPrediccion.length === 0 ? (
-                                        <TableRow><TableCell colSpan={6} className="p-12 text-center text-gray-500">Selecciona una sucursal y haz clic en "Analizar Inventario".</TableCell></TableRow>
+                                        <TableRow><TableCell colSpan={6} className="p-12 text-center text-gray-500">Selecciona un almacén y haz clic en "Analizar Inventario".</TableCell></TableRow>
                                     ) : (
                                         datosPrediccion.map((row: any, i: number) => (
                                             <TableRow key={i} className="hover:bg-gray-50 transition-colors border-b border-gray-100 last:border-0">
@@ -351,11 +367,11 @@ export default function PurchaseRequestsClient({
                         <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
                             <BarChart3 className="w-5 h-5 text-slate-500"/> Reporte de Órdenes
                         </h2>
-                        <p className="text-sm text-slate-500 font-medium mt-1">Consolida las órdenes de compra y el dinero invertido por sucursal.</p>
+                        <p className="text-sm text-slate-500 font-medium mt-1">Consolida las órdenes de compra y el dinero invertido por almacén.</p>
                     </div>
                     
                     <div className="flex flex-col md:flex-row items-center gap-3 w-full xl:w-auto">
-                        <BranchSelector />
+                        <WarehouseSelector />
                         
                         <div className="flex items-center gap-2 bg-white p-1.5 rounded-lg border border-slate-200 shadow-sm w-full md:w-auto">
                             <div className="flex items-center gap-2 px-2">
@@ -371,7 +387,7 @@ export default function PurchaseRequestsClient({
 
                         <button 
                             onClick={handleGenerarReporte} 
-                            disabled={cargandoReporte} 
+                            disabled={cargandoReporte || !selectedWarehouseId} 
                             className="w-full md:w-auto bg-slate-800 text-white px-6 py-2.5 rounded-lg font-semibold hover:bg-slate-900 shadow-sm transition-all disabled:opacity-50 flex items-center justify-center gap-2"
                         >
                             <FileText className="w-4 h-4" />

@@ -1,33 +1,31 @@
 'use client'
 
 import { useActionState, useState, useEffect } from "react";
-import { createPurchaseRequest, updatePurchaseRequest, getBranches, getRequestDetails, Quotation } from "@/actions/purchase-actions";
+import { createPurchaseRequest, updatePurchaseRequest, getRequestDetails, Quotation } from "@/actions/purchase-actions";
+import { obtenerAlmacenesPermitidosGlobal } from "@/actions/almacen-actions"; // ✨ NUEVO IMPORT
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Plus, ShoppingCart, Edit, FileText, X, Paperclip, Trash2 } from "lucide-react"; 
+import { Loader2, Plus, ShoppingCart, Edit, FileText, X, Paperclip, Trash2, Package } from "lucide-react"; 
 import { toast } from "sonner";
 
 const Req = () => <span className="text-red-500 ml-1 font-bold">*</span>;
 
-interface Branch { id: number; name: string; }
-
 interface RequestFormSheetProps {
   userBranchId?: number; 
-  userRole?: string; // 💡 NUEVO: Recibimos el rol del usuario
+  userRole?: string; 
   requestToEdit?: any;
   trigger?: React.ReactNode;
 }
 
 export function RequestFormSheet({ userBranchId, userRole, requestToEdit, trigger }: RequestFormSheetProps) {
   const [open, setOpen] = useState(false);
-  const [branches, setBranches] = useState<Branch[]>([]);
+  const [warehouses, setWarehouses] = useState<any[]>([]); // ✨ AHORA SON ALMACENES
   
-  // ESTADO CONTROLADO
-  const [selectedBranch, setSelectedBranch] = useState<string>("");
+  const [selectedWarehouse, setSelectedWarehouse] = useState<string>("");
 
   const [fileInputKeys, setFileInputKeys] = useState<number[]>([1]); 
   const [existingQuotations, setExistingQuotations] = useState<Quotation[]>([]);
@@ -35,61 +33,56 @@ export function RequestFormSheet({ userBranchId, userRole, requestToEdit, trigge
 
   const isEditing = !!requestToEdit;
   
-  // 🛡️ LÓGICA DE RESTRICCIÓN VISUAL
-  // El Gerente de Logística está en la lista, así que el candado NO se le aplicará
-  const PRIVILEGED_ROLES = ['GERENTE GENERAL', 'GERENTE DE LOGISTICA', 'ADMINISTRADOR GENERAL'];
+  // 🛡️ LÓGICA DE RESTRICCIÓN VISUAL (El backend ya filtra, pero mantenemos el candado visual)
+  const PRIVILEGED_ROLES = ['GERENTE GENERAL', 'GERENTE DE LOGISTICA', 'ADMINISTRADOR GENERAL', 'CEO'];
   const isRestricted = !PRIVILEGED_ROLES.includes(userRole?.toUpperCase() || "");
   
   const actionFn = isEditing ? updatePurchaseRequest : createPurchaseRequest;
   const [state, dispatch, isPending] = useActionState(actionFn, null);
 
-  // 1. CARGA DE DATOS E INICIALIZACIÓN
   useEffect(() => {
     if (open) {
-      // Cargar sucursales
-      getBranches().then(data => {
-          setBranches(data);
-
-          // LOGICA DE ASIGNACIÓN
-          if (isEditing && requestToEdit?.branch_id) {
-              setSelectedBranch(String(requestToEdit.branch_id));
-          } else if (!isEditing && userBranchId) {
-              setSelectedBranch(String(userBranchId));
-          } else if (data.length > 0 && !selectedBranch) {
-              setSelectedBranch(String(data[0].id));
+      // ✨ CARGAMOS LOS ALMACENES PERMITIDOS
+      obtenerAlmacenesPermitidosGlobal().then(res => {
+          if (res.success) {
+              setWarehouses(res.data);
+              
+              if (isEditing && requestToEdit?.warehouse_id) {
+                  setSelectedWarehouse(String(requestToEdit.warehouse_id));
+              } else if (res.data.length > 0 && !selectedWarehouse) {
+                  setSelectedWarehouse(String(res.data[0].id));
+              }
           }
       });
 
-      // Cargar cotizaciones
       if (isEditing && requestToEdit?.id) {
           getRequestDetails(requestToEdit.id).then(data => {
               setExistingQuotations(data.quotations);
           });
       }
     }
-  }, [open, isEditing, requestToEdit, userBranchId]); 
+  }, [open, isEditing, requestToEdit]); 
 
-  // 2. EFECTO POST-ENVÍO
   useEffect(() => {
     if (state?.success) {
       setOpen(false);
       toast.success(state.message);
       setFileInputKeys([1]);
       setDeletedQuotationIds([]);
-      setSelectedBranch(userBranchId ? String(userBranchId) : ""); 
+      // Reiniciar al primer almacén disponible
+      if (warehouses.length > 0) setSelectedWarehouse(String(warehouses[0].id));
     } else if (state?.message) {
       toast.error(state.message);
     }
-  }, [state, userBranchId]);
+  }, [state, warehouses]);
 
-  // Helpers
   const handleRemoveExistingFile = (id: number) => {
     setExistingQuotations(prev => prev.filter(q => q.id !== id));
     setDeletedQuotationIds(prev => [...prev, id]);
   };
   const addFileInput = () => setFileInputKeys(prev => [...prev, Date.now()]);
   const removeFileInput = (key: number) => {
-     if (fileInputKeys.length > 1) setFileInputKeys(prev => prev.filter(k => k !== key));
+      if (fileInputKeys.length > 1) setFileInputKeys(prev => prev.filter(k => k !== key));
   };
 
   return (
@@ -121,30 +114,33 @@ export function RequestFormSheet({ userBranchId, userRole, requestToEdit, trigge
                   <input key={id} type="hidden" name="deleted_file_ids" value={id} />
               ))}
               
-              {/* SUCURSAL */}
+              {/* ✨ ALMACÉN DESTINO */}
               <div className="space-y-2">
-                <Label className="text-xs font-semibold text-gray-600">Sucursal <Req/></Label>
+                <Label className="text-xs font-semibold text-gray-600">Almacén Destino <Req/></Label>
                 
-                {/* El campo oculto garantiza que el ID siempre se envíe al servidor */}
-                <input type="hidden" name="branch_id" value={selectedBranch} />
+                {/* ✨ AHORA ENVIAMOS warehouse_id AL BACKEND */}
+                <input type="hidden" name="warehouse_id" value={selectedWarehouse} />
 
                 <Select 
-                    key={`select-${isEditing ? 'edit' : 'create'}-${branches.length}`}
-                    value={selectedBranch} 
-                    onValueChange={setSelectedBranch} 
-                    disabled={isRestricted} // 🔒 CANDADO ACTIVADO
+                    key={`select-${isEditing ? 'edit' : 'create'}-${warehouses.length}`}
+                    value={selectedWarehouse} 
+                    onValueChange={setSelectedWarehouse} 
+                    disabled={isRestricted && warehouses.length <= 1} 
                     required
                 >
-                    <SelectTrigger className={`h-10 border-gray-200 ${isRestricted ? 'bg-gray-100 opacity-80 cursor-not-allowed' : 'bg-gray-50'}`}>
-                        <SelectValue placeholder={branches.length === 0 ? "Cargando sedes..." : "Seleccione Sede"} />
+                    <SelectTrigger className={`h-10 border-gray-200 ${isRestricted && warehouses.length <= 1 ? 'bg-gray-100 opacity-80 cursor-not-allowed' : 'bg-gray-50'}`}>
+                        <SelectValue placeholder={warehouses.length === 0 ? "Cargando almacenes..." : "Seleccione Almacén"} />
                     </SelectTrigger>
-                    <SelectContent>
-                        {branches.map((b) => (
-                            <SelectItem key={b.id} value={b.id.toString()}>
-                                {b.name}
-                            </SelectItem>
-                        ))}
-                    </SelectContent>
+                    <SelectContent position="popper" className="max-h-[300px] overflow-y-auto">
+    {warehouses.map((w) => (
+        <SelectItem key={w.id} value={w.id.toString()}>
+            <div className="flex items-center gap-2">
+                <Package className="w-3 h-3 text-blue-500" />
+                <span>{w.name} <span className="text-xs text-gray-400">({w.branch_name})</span></span>
+            </div>
+        </SelectItem>
+    ))}
+</SelectContent>
                 </Select>
               </div>
 
@@ -156,7 +152,7 @@ export function RequestFormSheet({ userBranchId, userRole, requestToEdit, trigge
                     required 
                     key={`desc-${requestToEdit?.id || 'new'}`}
                     defaultValue={isEditing ? requestToEdit.description : ""}
-                    placeholder="Ej: 50 cajas de papel..." 
+                    placeholder="Ej: 50 cajas de papel para el almacén de empaques..." 
                     className="min-h-[100px] bg-gray-50 border-gray-200 resize-none"
                 />
               </div>

@@ -1,11 +1,11 @@
 'use client'
 
 import { useState, useEffect } from "react";
-import { getCierreInventario } from "@/actions/report-actions";
 import { obtenerResumenVentasDiarias, verificarEstadoCierre, enviarCierreDiario } from "@/actions/cierre-financiero-actions";
+import { obtenerResumenCierreAlmacenParaFinanzas } from "@/actions/almacen-actions"; 
 import { 
-    AlertTriangle, TrendingUp, TrendingDown, PackageSearch, Search, 
-    Package, DollarSign, Receipt, CreditCard, Calculator, Clock, ChevronDown, ChevronUp, Lock, Send, CheckCircle, Wallet
+    AlertTriangle, TrendingUp, PackageSearch, Search, 
+    DollarSign, Receipt, CreditCard, Calculator, Clock, ChevronDown, ChevronUp, Lock, Send, CheckCircle, Wallet
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Cell } from 'recharts';
 
@@ -26,14 +26,16 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
     const [isClosed, setIsClosed] = useState(false);
     const [isSending, setIsSending] = useState(false);
 
-    // ✨ ESTADOS PARA EL DESGLOSE DE EFECTIVO
+    // ESTADOS LOGÍSTICOS
+    const [estadoAlmacenes, setEstadoAlmacenes] = useState({ cerrado: false, total: 0, completados: 0 });
+    const [datosAlmacen, setDatosAlmacen] = useState<any[]>([]);
+
     const [showCashBreakdown, setShowCashBreakdown] = useState(false);
     const [cashBreakdown, setCashBreakdown] = useState({
         billetes_200: '', billetes_100: '', billetes_50: '', billetes_20: '', billetes_10: '',
         monedas_5: '', monedas_2: '', monedas_1: '', monedas_050: '', monedas_020: '', monedas_010: ''
     });
 
-    const [datos, setDatos] = useState<any[]>([]);
     const [datosPagos, setDatosPagos] = useState<any[]>([]);
     const [datosArticulos, setDatosArticulos] = useState<any[]>([]);
     const [datosTurnos, setDatosTurnos] = useState<any[]>([]);
@@ -41,7 +43,7 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
     const [turnoSeleccionado, setTurnoSeleccionado] = useState<string | null>(null); 
 
     const [kpis, setKpis] = useState({ total_operaciones: 0, total_dinero: 0, ticket_promedio: 0 });
-    const [pestañaActiva, setPestañaActiva] = useState("inventario");
+    const [pestañaActiva, setPestañaActiva] = useState("almacen");
 
     const formatMoneda = (valor: any) => {
         return new Intl.NumberFormat('en-US', { 
@@ -55,7 +57,6 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
     const totalDineroArticulos = datosArticulos.reduce((sum, item) => sum + Number(item.total_generado), 0);
     const totalCantidadArticulos = datosArticulos.reduce((sum, item) => sum + Number(item.cantidad_vendida), 0);
 
-    // ✨ CÁLCULO EN TIEMPO REAL DEL EFECTIVO FÍSICO
     const calcularEfectivoFisico = () => {
         return (
             (Number(cashBreakdown.billetes_200) * 200) +
@@ -72,16 +73,12 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
         );
     };
 
-    // ✨ EXTRACCIÓN DEL EFECTIVO ESPERADO EN EL SISTEMA
     const pagoEfectivo = datosPagos.find(p => p.metodo_pago?.toUpperCase() === 'EFECTIVO');
     const totalEfectivoEsperado = pagoEfectivo ? Number(pagoEfectivo.total_recaudado) : 0;
     const totalFisico = calcularEfectivoFisico();
     const diferenciaEfectivo = totalFisico - totalEfectivoEsperado;
-    
-    // Validamos si la diferencia es 0 (permitimos un margen de 2 céntimos por si hay redondeos extraños en la BD)
     const isCuadrado = Math.abs(diferenciaEfectivo) <= 0.02;
 
-    // ✨ EFECTO PARA LIMPIAR LA CALCULADORA SI CAMBIAN DE FECHA O SUCURSAL SIN DARLE A GENERAR
     useEffect(() => {
         setCashBreakdown({
             billetes_200: '', billetes_100: '', billetes_50: '', billetes_20: '', billetes_10: '',
@@ -95,7 +92,6 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
         setHasSearched(true);
         setTurnoSeleccionado(null); 
         
-        // ✨ LIMPIAMOS LOS BILLETES AL BUSCAR UN NUEVO DÍA
         setCashBreakdown({
             billetes_200: '', billetes_100: '', billetes_50: '', billetes_20: '', billetes_10: '',
             monedas_5: '', monedas_2: '', monedas_1: '', monedas_050: '', monedas_020: '', monedas_010: ''
@@ -105,14 +101,22 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
             const estadoRes = await verificarEstadoCierre(Number(branchId), fecha);
             setIsClosed(estadoRes.isClosed);
 
-            const [resultInventario, resultFinanzas] = await Promise.all([
-                getCierreInventario({ branchId: Number(branchId), fechaInicio: fecha, fechaFin: fecha }),
-                obtenerResumenVentasDiarias(Number(branchId), fecha)
-            ]);
-            
-            if (resultInventario.success) setDatos(resultInventario.data);
-            else { alert("ERROR EN BASE DE DATOS (Inventario):\n" + resultInventario.message); setDatos([]); }
+            // ✨ ESTE ES EL BLOQUE QUE DEBES ACTUALIZAR:
+            const almacenRes = await obtenerResumenCierreAlmacenParaFinanzas(Number(branchId), fecha);
+            if (almacenRes.success) {
+                setEstadoAlmacenes({
+                    cerrado: almacenRes.isInventarioCerrado,
+                    total: almacenRes.totalAlmacenes,
+                    completados: almacenRes.almacenesCerrados
+                });
+                setDatosAlmacen(almacenRes.data);
+            } else {
+                // ✨ AHORA EL SISTEMA NOS AVISARÁ SI HAY UN ERROR
+                alert("ERROR CARGANDO DATOS LOGÍSTICOS:\n" + almacenRes.message);
+            }
 
+            const resultFinanzas = await obtenerResumenVentasDiarias(Number(branchId), fecha);
+            
             if (resultFinanzas.success) {
                 setDatosPagos(resultFinanzas.pagos);
                 setDatosArticulos(resultFinanzas.articulos);
@@ -159,7 +163,6 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
         if (res.success) {
             setIsClosed(true);
             setShowCashBreakdown(false);
-            // ✨ LIMPIAMOS LOS BILLETES TRAS ENVIAR EL CIERRE EXITOSAMENTE
             setCashBreakdown({
                 billetes_200: '', billetes_100: '', billetes_50: '', billetes_20: '', billetes_10: '',
                 monedas_5: '', monedas_2: '', monedas_1: '', monedas_050: '', monedas_020: '', monedas_010: ''
@@ -180,13 +183,19 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
         else setTurnoSeleccionado(turnoNombre);
     };
 
+    const almacenesAgrupados = datosAlmacen.reduce((acc: any, item) => {
+        if (!acc[item.almacen_nombre]) acc[item.almacen_nombre] = [];
+        acc[item.almacen_nombre].push(item);
+        return acc;
+    }, {});
+
     return (
         <div className="space-y-6 w-full max-w-7xl mx-auto">
             <div className="border-b pb-4">
                 <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
                     <Search className="text-blue-600" /> Panel de Cierre Diario
                 </h1>
-                <p className="text-gray-600">Consulta el movimiento de almacen y el resumen financiero del dia.</p>
+                <p className="text-gray-600">Consulta el movimiento de almacén y el resumen financiero del día.</p>
             </div>
 
             <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex flex-col md:flex-row gap-4 items-end">
@@ -210,37 +219,44 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
                 <div className="mt-8 bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
                     
                     <div className="bg-gray-100 p-4 border-b border-gray-200 flex flex-col sm:flex-row justify-between items-center gap-4">
-                        <div>
+                        <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
                             {isClosed ? (
-                                <div className="bg-red-100 text-red-800 border border-red-200 px-4 py-2 rounded-md font-bold flex items-center gap-2 shadow-sm">
+                                <div className="bg-red-100 text-red-800 border border-red-200 px-4 py-2 rounded-md font-bold flex items-center gap-2 shadow-sm whitespace-nowrap">
                                     <Lock className="w-5 h-5" /> 
                                     CIERRE ENVIADO Y BLOQUEADO
                                     <span className="text-xs font-normal ml-2 opacity-80">(Solo lectura)</span>
                                 </div>
                             ) : (
-                                <div className="bg-green-100 text-green-800 border border-green-200 px-4 py-2 rounded-md font-bold flex items-center gap-2 shadow-sm">
+                                <div className="bg-green-100 text-green-800 border border-green-200 px-4 py-2 rounded-md font-bold flex items-center gap-2 shadow-sm whitespace-nowrap">
                                     <CheckCircle className="w-5 h-5" />
                                     DÍA ABIERTO Y EDITABLE
+                                </div>
+                            )}
+
+                            {!estadoAlmacenes.cerrado && !isClosed && (
+                                <div className="bg-orange-100 text-orange-800 border border-orange-200 px-4 py-2 rounded-md font-bold flex items-center gap-2 shadow-sm animate-pulse whitespace-nowrap">
+                                    <AlertTriangle className="w-5 h-5" /> INVENTARIO PENDIENTE ({estadoAlmacenes.completados}/{estadoAlmacenes.total})
                                 </div>
                             )}
                         </div>
                         
                         <button 
                             onClick={() => setShowCashBreakdown(true)}
-                            disabled={isClosed || isSending || datosPagos.length === 0}
+                            disabled={isClosed || isSending || datosPagos.length === 0 || !estadoAlmacenes.cerrado}
                             className={`flex items-center justify-center gap-2 px-6 py-2.5 rounded-md font-bold transition-all shadow-sm w-full sm:w-auto
                                 ${isClosed ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 
+                                  !estadoAlmacenes.cerrado ? 'bg-gray-300 text-gray-500 cursor-not-allowed' :
                                   datosPagos.length === 0 ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 
                                   'bg-blue-600 text-white hover:bg-blue-700 hover:shadow-md'}`}
                         >
-                            {isClosed ? <Lock className="w-4 h-4" /> : <Send className="w-4 h-4" />}
-                            {isClosed ? "Cierre Completado" : "Enviar Cierre Diario Definitivo"}
+                            {isClosed ? <Lock className="w-4 h-4" /> : !estadoAlmacenes.cerrado ? <Lock className="w-4 h-4" /> : <Send className="w-4 h-4" />}
+                            {isClosed ? "Cierre Completado" : !estadoAlmacenes.cerrado ? "Cierra el Almacén Primero" : "Enviar Cierre Diario Definitivo"}
                         </button>
                     </div>
 
                     <div className="flex border-b border-gray-200 bg-gray-50 flex-wrap">
-                        <button className={`flex-1 min-w-[200px] py-4 text-center font-bold flex items-center justify-center gap-2 transition-colors ${pestañaActiva === 'inventario' ? 'text-blue-700 border-b-2 border-blue-700 bg-white' : 'text-gray-500 hover:text-gray-700'}`} onClick={() => setPestañaActiva('inventario')}>
-                            <Package className="w-5 h-5" /> Cuadre de Almacen
+                        <button className={`flex-1 min-w-[200px] py-4 text-center font-bold flex items-center justify-center gap-2 transition-colors ${pestañaActiva === 'almacen' ? 'text-blue-700 border-b-2 border-blue-700 bg-white' : 'text-gray-500 hover:text-gray-700'}`} onClick={() => setPestañaActiva('almacen')}>
+                            <PackageSearch className="w-5 h-5" /> Reporte de Almacén y Merma
                         </button>
                         <button className={`flex-1 min-w-[200px] py-4 text-center font-bold flex items-center justify-center gap-2 transition-colors ${pestañaActiva === 'finanzas' ? 'text-green-700 border-b-2 border-green-700 bg-white' : 'text-gray-500 hover:text-gray-700'}`} onClick={() => setPestañaActiva('finanzas')}>
                             <DollarSign className="w-5 h-5" /> Resumen Financiero
@@ -250,69 +266,91 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
                         </button>
                     </div>
 
-                    <div className="p-6">
-                        {pestañaActiva === 'inventario' && (
-                            <div className="animate-in fade-in duration-300">
-                                <h2 className="text-lg font-bold text-gray-800 mb-4">Rotacion de Ingredientes</h2>
-                                 <div className="overflow-x-auto border rounded-lg max-h-[600px] overflow-y-auto">
-                                    <table className="min-w-full text-left text-sm whitespace-nowrap">
-                                        <thead className="bg-gray-100 border-b border-gray-200 sticky top-0">
-                                            <tr>
-                                                <th className="p-3 font-semibold text-gray-700">Producto / Insumo</th>
-                                                <th className="p-3 font-semibold text-gray-700 text-center">Stock Teorico Inicio</th>
-                                                <th className="p-3 font-semibold text-blue-700 text-center">+ Ingresos Hoy</th>
-                                                <th className="p-3 font-semibold text-orange-700 text-center">- Ventas/Consumo</th>
-                                                <th className="p-3 font-semibold text-gray-900 text-center">Stock Actual</th>
-                                                <th className="p-3 font-semibold text-gray-700 text-center">Estado / Rotacion</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-gray-200">
-                                            {datos.length === 0 ? (
-                                                <tr><td colSpan={6} className="p-8 text-center text-gray-500">No hay movimientos en esta fecha.</td></tr>
-                                            ) : (
-                                                datos.map((item, idx) => {
-                                                    const stockActual = Number(item.stock_actual);
-                                                    const ingresos = Number(item.ingresos_rango);
-                                                    const salidas = Number(item.salidas_rango);
-                                                    const stockInicio = stockActual - ingresos + salidas;
-
-                                                    const diasCobertura = salidas > 0 ? (stockActual / salidas) : (stockActual > 0 ? 999 : 0);
-                                                    const isOverstock = diasCobertura > 5 && stockActual > 0; 
-                                                    const isDesabastecido = stockActual <= 0;
-
-                                                    return (
-                                                        <tr key={idx} className={`hover:bg-gray-50 transition-colors ${isOverstock ? 'bg-red-50/50' : ''}`}>
-                                                            <td className="p-3 font-medium text-gray-900">
-                                                                {item.producto} <span className="text-xs text-gray-500 font-normal">({item.unidad})</span>
-                                                            </td>
-                                                            <td className="p-3 text-center text-gray-600">{stockInicio.toFixed(2)}</td>
-                                                            <td className="p-3 text-center text-blue-600 font-medium">+{ingresos.toFixed(2)}</td>
-                                                            <td className="p-3 text-center text-orange-600 font-medium">-{salidas.toFixed(2)}</td>
-                                                            <td className="p-3 text-center font-bold text-gray-900 text-lg">
-                                                                {stockActual.toFixed(2)}
-                                                            </td>
-                                                            <td className="p-3 text-center">
-                                                                {isOverstock ? (
-                                                                    <span className="flex items-center justify-center gap-1 text-xs font-bold text-red-700 bg-red-100 px-2 py-1 rounded border border-red-200">
-                                                                        <AlertTriangle className="w-3 h-3" /> Exceso ({diasCobertura.toFixed(0)} dias)
-                                                                    </span>
-                                                                ) : isDesabastecido ? (
-                                                                    <span className="flex items-center justify-center gap-1 text-xs font-bold text-gray-700 bg-gray-100 px-2 py-1 rounded">
-                                                                        <TrendingDown className="w-3 h-3 text-red-500" /> Agotado
-                                                                    </span>
-                                                                ) : (
-                                                                    <span className="flex items-center justify-center gap-1 text-xs font-bold text-green-700 bg-green-100 px-2 py-1 rounded">
-                                                                        <TrendingUp className="w-3 h-3" /> Saludable
-                                                                    </span>
-                                                                )}
-                                                            </td>
-                                                        </tr>
-                                                    );
-                                                })
-                                            )}
-                                        </tbody>
-                                    </table>
+                    <div className="p-6 bg-gray-50/30">
+                        {pestañaActiva === 'almacen' && (
+                            <div className="space-y-6 animate-in fade-in duration-300">
+                                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-5 rounded-lg border shadow-sm">
+                                    <div>
+                                        <h2 className="text-lg font-bold text-gray-800">Auditoría de Almacenes</h2>
+                                        <p className="text-sm text-gray-500">Revisa las diferencias reportadas por los almaceneros antes de cerrar la caja.</p>
+                                    </div>
+                                    <div className="flex gap-4">
+                                        <div className="text-center">
+                                            <p className="text-xs text-gray-500 font-bold uppercase">Almacenes en la Sede</p>
+                                            <p className="text-2xl font-black text-gray-800">{estadoAlmacenes.total}</p>
+                                        </div>
+                                        <div className="text-center">
+                                            <p className="text-xs text-gray-500 font-bold uppercase">Cierres Enviados</p>
+                                            <p className={`text-2xl font-black ${estadoAlmacenes.cerrado ? 'text-green-600' : 'text-orange-500'}`}>
+                                                {estadoAlmacenes.completados}
+                                            </p>
+                                        </div>
+                                    </div>
                                 </div>
+
+                                {datosAlmacen.length > 0 ? (
+                                    <div className="space-y-6">
+                                        {Object.entries(almacenesAgrupados).map(([nombreAlmacen, items]: [string, any]) => (
+                                            <div key={nombreAlmacen} className="bg-white border rounded-lg shadow-sm overflow-hidden">
+                                                <div className="bg-slate-800 text-white p-3 font-bold text-sm flex items-center gap-2">
+                                                    <PackageSearch className="w-4 h-4 text-blue-400" /> {nombreAlmacen}
+                                                </div>
+                                                <div className="overflow-x-auto">
+                                                    <table className="min-w-full text-left text-sm">
+                                                        <thead className="bg-gray-50 border-b">
+                                                            <tr>
+                                                                <th className="p-3 font-semibold text-gray-600 w-1/4">Producto / Insumo</th>
+                                                                <th className="p-3 font-semibold text-orange-700 text-center bg-orange-50/50">Consumo x Venta</th>
+                                                                <th className="p-3 font-semibold text-gray-600 text-center">Stock Sistema (Teórico)</th>
+                                                                <th className="p-3 font-semibold text-blue-700 text-center bg-blue-50 border-x">Conteo Físico (Real)</th>
+                                                                <th className="p-3 font-black text-red-700 text-center">Merma / Descuadre</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody className="divide-y divide-gray-100">
+                                                            {items.map((prod: any, idx: number) => {
+                                                                const diferencia = Number(prod.difference);
+                                                                return (
+                                                                    <tr key={idx} className="hover:bg-gray-50 transition-colors">
+                                                                        <td className="p-3 text-gray-800 font-bold">
+                                                                            {prod.producto} <span className="text-xs text-gray-400 font-normal">({prod.unidad})</span>
+                                                                        </td>
+                                                                        <td className="p-3 text-center text-orange-700 font-mono font-bold bg-orange-50/20">
+                                                                            {Number(prod.consumido_ventas).toFixed(2)}
+                                                                        </td>
+                                                                        <td className="p-3 text-center text-gray-600 font-mono">
+                                                                            {Number(prod.system_stock).toFixed(2)}
+                                                                        </td>
+                                                                        <td className="p-3 text-center font-black text-blue-900 bg-blue-50/30 border-x text-base">
+                                                                            {Number(prod.physical_stock).toFixed(2)}
+                                                                        </td>
+                                                                        <td className="p-3 text-center">
+                                                                            {diferencia < 0 ? (
+                                                                                <span className="px-3 py-1.5 rounded-md text-sm font-black bg-red-100 text-red-800 border border-red-200 shadow-sm">
+                                                                                    {diferencia.toFixed(2)}
+                                                                                </span>
+                                                                            ) : diferencia > 0 ? (
+                                                                                <span className="px-3 py-1.5 rounded-md text-xs font-bold bg-green-50 text-green-700 border border-green-200">
+                                                                                    +{diferencia.toFixed(2)} (Sobrante)
+                                                                                </span>
+                                                                            ) : (
+                                                                                <span className="text-gray-400 font-bold text-xs">OK (Cuadrado)</span>
+                                                                            )}
+                                                                        </td>
+                                                                    </tr>
+                                                                );
+                                                            })}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className="bg-white p-12 rounded-lg border border-dashed flex flex-col items-center justify-center text-gray-400 gap-3">
+                                        <AlertTriangle className="w-12 h-12 opacity-30" />
+                                        <p>Ningún almacén ha reportado su cierre físico para el {fecha}.</p>
+                                    </div>
+                                )}
                             </div>
                         )}
 
@@ -397,12 +435,7 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
                                                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
                                                     <XAxis dataKey="rango_horas" tickFormatter={getShiftNameOnly} stroke="#6b7280" />
                                                     <YAxis stroke="#6b7280" tickFormatter={(val) => `S/ ${formatMoneda(val)}`} />
-                                                    <RechartsTooltip 
-                                                        cursor={{fill: '#f3f4f6'}} 
-                                                        contentStyle={{borderRadius: '8px', border: '1px solid #e5e7eb'}} 
-                                                        formatter={(value: any) => [`S/ ${formatMoneda(value)}`, 'Generado']} 
-                                                        labelFormatter={getShiftFullName} 
-                                                    />
+                                                    <RechartsTooltip cursor={{fill: '#f3f4f6'}} contentStyle={{borderRadius: '8px', border: '1px solid #e5e7eb'}} formatter={(value: any) => [`S/ ${formatMoneda(value)}`, 'Generado']} labelFormatter={getShiftFullName} />
                                                     <Bar dataKey="total_generado" radius={[4, 4, 0, 0]}>
                                                         {datosTurnos.map((entry, index) => (
                                                             <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
@@ -419,7 +452,7 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
                                 <div className="bg-white border rounded-lg shadow-sm overflow-hidden">
                                     <div className="p-5 border-b bg-gray-50">
                                         <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
-                                            <Package className="text-orange-500 w-5 h-5" /> Detalle de Productos por Turno
+                                            <Receipt className="text-orange-500 w-5 h-5" /> Detalle de Productos por Turno
                                         </h2>
                                     </div>
                                     
@@ -487,7 +520,6 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
                 </div>
             )}
 
-            {/* ✨ MEGA-MODAL DE DESGLOSE DE EFECTIVO PARA EL CIERRE ✨ */}
             {showCashBreakdown && (
                 <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4">
                     <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full flex flex-col overflow-hidden max-h-[90vh]">
@@ -505,7 +537,6 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
 
                         <div className="p-6 overflow-y-auto flex-1 bg-gray-50 border-b border-gray-200">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                                {/* Columna Billetes */}
                                 <div className="space-y-3">
                                     <h4 className="font-bold text-gray-700 border-b pb-2 mb-4 uppercase tracking-wider text-sm flex items-center gap-2">
                                         💵 Billetes
@@ -523,7 +554,7 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
                                                 <span className="text-xs text-gray-400 font-medium">Cant:</span>
                                                 <input 
                                                     type="number" min="0" placeholder="0"
-                                                    className="w-20 p-2 border border-gray-300 rounded-md text-right font-bold text-blue-700 focus:ring-2 focus:ring-blue-500"
+                                                    className="w-20 p-2 border border-gray-300 rounded-md text-right font-bold text-blue-700 focus:ring-2 focus:ring-blue-500 outline-none"
                                                     value={(cashBreakdown as any)[item.k]}
                                                     onChange={e => setCashBreakdown({...cashBreakdown, [item.k]: e.target.value})}
                                                 />
@@ -532,7 +563,6 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
                                     ))}
                                 </div>
 
-                                {/* Columna Monedas */}
                                 <div className="space-y-3">
                                     <h4 className="font-bold text-gray-700 border-b pb-2 mb-4 uppercase tracking-wider text-sm flex items-center gap-2">
                                         🪙 Monedas
@@ -551,7 +581,7 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
                                                 <span className="text-xs text-gray-400 font-medium">Cant:</span>
                                                 <input 
                                                     type="number" min="0" placeholder="0"
-                                                    className="w-20 p-2 border border-gray-300 rounded-md text-right font-bold text-blue-700 focus:ring-2 focus:ring-blue-500"
+                                                    className="w-20 p-2 border border-gray-300 rounded-md text-right font-bold text-blue-700 focus:ring-2 focus:ring-blue-500 outline-none"
                                                     value={(cashBreakdown as any)[item.k]}
                                                     onChange={e => setCashBreakdown({...cashBreakdown, [item.k]: e.target.value})}
                                                 />
@@ -562,7 +592,6 @@ export default function CierreClient({ sucursales }: { sucursales: any[] }) {
                             </div>
                         </div>
 
-                        {/* ✨ RESUMEN Y CUADRE FINAL ✨ */}
                         <div className="p-6 bg-white flex flex-col gap-4">
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                                 <div className="bg-gray-100 p-4 rounded-xl border border-gray-200 text-center">

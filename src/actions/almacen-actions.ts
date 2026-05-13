@@ -15,13 +15,11 @@ export async function obtenerMisAlmacenes(branchId: number) {
 
     const connection = await pool.getConnection();
     try {
-        // ✨ CORRECCIÓN: Gerentes ven TODOS los de TODAS las sucursales. Admin Sucursal ve TODOS los de SU sucursal.
         if (['GERENTE GENERAL', 'ADMINISTRADOR GENERAL', 'GERENTE DE LOGISTICA', 'ADMIN_SUCURSAL'].includes(role)) {
             const [rows]: any = await connection.query("SELECT id, name FROM warehouses WHERE branch_id = ? AND status = 1", [branchId]);
             return { success: true, data: rows };
         }
 
-        // Los almaceneros ven SOLO los que se les ha asignado físicamente
         const [rows]: any = await connection.query(
             `SELECT w.id, w.name 
              FROM warehouses w
@@ -100,7 +98,7 @@ export async function guardarCierreAlmacenDiario(data: {
 }
 
 // ============================================================================
-// 2. ✨ NUEVAS FUNCIONES: GESTIÓN DE ALMACENES Y ASIGNACIONES
+// 2. FUNCIONES DE GESTIÓN DE ALMACENES Y ASIGNACIONES
 // ============================================================================
 export async function crearNuevoAlmacen(branchId: number, nombre: string) {
     const connection = await pool.getConnection();
@@ -151,7 +149,6 @@ export async function removerUsuarioAlmacen(warehouseId: number, userId: number)
 export async function obtenerUsuariosDisponiblesParaAsignar() {
     const connection = await pool.getConnection();
     try {
-        // ✨ Agregamos branch_ids para poder filtrar en el Frontend
         const [rows]: any = await connection.query(`
             SELECT 
                 u.id, 
@@ -172,5 +169,136 @@ export async function obtenerUsuariosDisponiblesParaAsignar() {
         return { success: false, message: error.message };
     } finally { 
         connection.release(); 
+    }
+}
+
+// ============================================================================
+// 3. ✨ NUEVA FUNCIÓN: PUENTE PARA EL CIERRE FINANCIERO (CON CONSUMO DE VENTAS)
+// ============================================================================
+export async function obtenerResumenCierreAlmacenParaFinanzas(branchId: number, fecha: string) {
+    const connection = await pool.getConnection();
+    try {
+        const [warehouses]: any = await connection.query("SELECT id FROM warehouses WHERE branch_id = ? AND status = 1", [branchId]);
+        const totalAlmacenes = warehouses.length;
+
+        // Aseguramos que la fecha coincida exactamente usando DATE()
+        const [closures]: any = await connection.query(`
+            SELECT DISTINCT warehouse_id 
+            FROM warehouse_closures 
+            WHERE warehouse_id IN (SELECT id FROM warehouses WHERE branch_id = ?) 
+            AND DATE(closure_date) = ? AND status = 1
+        `, [branchId, fecha]);
+        const almacenesCerrados = closures.length;
+
+        const isInventarioCerrado = totalAlmacenes > 0 && almacenesCerrados === totalAlmacenes;
+
+        // 1. Traemos la lista base
+        const [detalles]: any = await connection.query(`
+            SELECT 
+                w.name as almacen_nombre,
+                p.id as real_product_id,
+                p.name as producto,
+                p.unit_measure as unidad,
+                wcd.system_stock,
+                wcd.physical_stock,
+                wcd.difference,
+                0 AS consumido_ventas
+            FROM warehouse_closures wc
+            JOIN warehouse_closure_details wcd ON wc.id = wcd.closure_id
+            JOIN warehouses w ON wc.warehouse_id = w.id
+            JOIN products p ON wcd.product_id = p.id
+            WHERE w.branch_id = ? AND DATE(wc.closure_date) = ?
+            ORDER BY w.name ASC, p.name ASC
+        `, [branchId, fecha]);
+
+        // 2. Calculamos las ventas de forma separada (AHORA CON id_sale)
+        for (let i = 0; i < detalles.length; i++) {
+            const row = detalles[i];
+            
+            // Consumo por recetas (Makis, Platos)
+            const [consumoMenu]: any = await connection.query(`
+                SELECT IFNULL(SUM(sd.quantity * pr.quantity), 0) as total
+                FROM sales s
+                JOIN sale_details sd ON s.id_sale = sd.sale_id -- ✨ CORREGIDO AQUÍ
+                JOIN product_recipes pr ON sd.menu_id = pr.menu_id
+                WHERE s.branch_id = ? AND DATE(s.sale_date) = ? AND pr.component_id = ? AND s.status = 1
+            `, [branchId, fecha, row.real_product_id]);
+
+            // Consumo directo (Gaseosas, Cajas, Extras)
+            const [consumoDirecto]: any = await connection.query(`
+                SELECT IFNULL(SUM(sd.quantity), 0) as total
+                FROM sales s
+                JOIN sale_details sd ON s.id_sale = sd.sale_id -- ✨ CORREGIDO AQUÍ
+                WHERE s.branch_id = ? AND DATE(s.sale_date) = ? AND sd.product_id = ? AND s.status = 1
+            `, [branchId, fecha, row.real_product_id]);
+
+            // Sumamos ambos consumos
+            row.consumido_ventas = Number(consumoMenu[0].total) + Number(consumoDirecto[0].total);
+        }
+
+        return { 
+            success: true, 
+            isInventarioCerrado, 
+            totalAlmacenes,
+            almacenesCerrados,
+            data: detalles 
+        };
+    } catch (error: any) {
+        console.error("Error obteniendo resumen de almacenes:", error);
+        return { success: false, message: error.message, data: [], isInventarioCerrado: false, totalAlmacenes: 0, almacenesCerrados: 0 };
+    } finally {
+        connection.release();
+    }
+}
+
+export async function obtenerAlmacenesPermitidosGlobal() {
+    const session = await auth();
+    if (!session?.user?.id) return { success: false, data: [] };
+
+    const userId = session.user.id;
+    const role = session.user.role?.toUpperCase().trim() || "";
+
+    const connection = await pool.getConnection();
+    try {
+        // 1. GERENTES: Ven absolutamente todos los almacenes del ERP
+        if (['GERENTE GENERAL', 'ADMINISTRADOR GENERAL', 'GERENTE DE LOGISTICA', 'CEO'].includes(role)) {
+            const [rows]: any = await connection.query(`
+                SELECT w.id, w.name, b.name as branch_name, w.branch_id
+                FROM warehouses w
+                JOIN branches b ON w.branch_id = b.id
+                WHERE w.status = 1
+                ORDER BY b.name ASC, w.name ASC
+            `);
+            return { success: true, data: rows };
+        }
+
+        // 2. ADMIN SUCURSAL: Ve todos los almacenes que pertenezcan a su(s) sucursal(es) asignada(s)
+        if (['ADMIN_SUCURSAL'].includes(role)) {
+            const [rows]: any = await connection.query(`
+                SELECT w.id, w.name, b.name as branch_name, w.branch_id
+                FROM warehouses w
+                JOIN branches b ON w.branch_id = b.id
+                JOIN user_branches ub ON b.id = ub.branch_id
+                WHERE ub.user_id = ? AND w.status = 1
+                ORDER BY b.name ASC, w.name ASC
+            `, [userId]);
+            return { success: true, data: rows };
+        }
+
+        // 3. ALMACENEROS: Ven SOLO los almacenes físicos que se les asignó con la llavecita
+        const [rows]: any = await connection.query(`
+            SELECT w.id, w.name, b.name as branch_name, w.branch_id
+            FROM warehouses w
+            JOIN branches b ON w.branch_id = b.id
+            JOIN user_warehouses uw ON w.id = uw.warehouse_id
+            WHERE uw.user_id = ? AND w.status = 1
+            ORDER BY b.name ASC, w.name ASC
+        `, [userId]);
+        
+        return { success: true, data: rows };
+    } catch (error: any) {
+        return { success: false, message: error.message };
+    } finally {
+        connection.release();
     }
 }
