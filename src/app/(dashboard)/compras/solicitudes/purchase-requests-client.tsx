@@ -2,14 +2,14 @@
 
 import { useState, useEffect } from "react";
 import { getPurchaseRequests, obtenerReporteCompras, obtenerPrediccionCompras } from "@/actions/purchase-actions";
-import { obtenerAlmacenesPermitidosGlobal } from "@/actions/almacen-actions"; // ✨ NUEVO IMPORT
 import { RequestFormSheet } from "@/components/modules/compras/request-form-sheet";
+import { BulkRequestDialog } from "@/components/modules/compras/bulk-request-dialog"; 
 import { PurchaseRequestActions } from "@/components/modules/compras/purchase-request-actions"; 
 import { PurchaseRequestFilters } from "@/components/modules/compras/purchase-request-filters";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { ShoppingCart, Calendar, User, FileText, MessageSquare, TrendingUp, BarChart3, AlertCircle, CheckCircle2, RefreshCw, Package } from "lucide-react";
+import { ShoppingCart, Calendar, User, FileText, MessageSquare, TrendingUp, BarChart3, AlertCircle, CheckCircle2, RefreshCw, Package, Building2 } from "lucide-react";
 
 const money = (amount: number, currency: string = 'PEN') => {
     return new Intl.NumberFormat('es-PE', { style: 'currency', currency: currency }).format(amount);
@@ -53,9 +53,8 @@ export default function PurchaseRequestsClient({
     const [activeTab, setActiveTab] = useState('solicitudes');
     const [requests, setRequests] = useState(initialRequests);
 
-    // ✨ AHORA USAMOS ALMACENES EN LUGAR DE SUCURSALES
-    const [almacenes, setAlmacenes] = useState<any[]>([]);
-    const [selectedWarehouseId, setSelectedWarehouseId] = useState<number>(0);
+    // ✨ REGRESAMOS A USAR SUCURSALES EN VEZ DE ALMACENES
+    const [selectedBranchId, setSelectedBranchId] = useState<number>(userBranchId || (branches.length > 0 ? branches[0].id : 0));
 
     const [datosPrediccion, setDatosPrediccion] = useState<any[]>([]);
     const [cargandoPrediccion, setCargandoPrediccion] = useState(false);
@@ -69,52 +68,43 @@ export default function PurchaseRequestsClient({
         setRequests(initialRequests);
     }, [initialRequests]);
 
-    // ✨ CARGAMOS LOS ALMACENES PERMITIDOS AL INICIAR
-    useEffect(() => {
-        obtenerAlmacenesPermitidosGlobal().then(res => {
-            if (res.success && res.data.length > 0) {
-                setAlmacenes(res.data);
-                setSelectedWarehouseId(res.data[0].id);
-            }
-        });
-    }, []);
-
     const loadData = async (filtros: any) => {
         const data = await getPurchaseRequests(filtros);
         setRequests(data);
     };
 
     const handleGenerarPrediccion = async () => {
-        if (!selectedWarehouseId) return;
+        if (!selectedBranchId) return;
         setCargandoPrediccion(true);
-        // ✨ AHORA ENVÍA EL ID DEL ALMACÉN FÍSICO AL BACKEND
-        const res = await obtenerPrediccionCompras(selectedWarehouseId); 
+        // ✨ AHORA ENVÍA EL ID DE LA SUCURSAL
+        const res = await obtenerPrediccionCompras(selectedBranchId); 
         if (res.success) setDatosPrediccion(res.data);
         else alert("Error al analizar el inventario.");
         setCargandoPrediccion(false);
     };
 
     const handleGenerarReporte = async () => {
-        if (!selectedWarehouseId) return;
+        if (!selectedBranchId) return;
         setCargandoReporte(true);
-        // ✨ AHORA ENVÍA EL ID DEL ALMACÉN FÍSICO AL BACKEND
-        const res = await obtenerReporteCompras(selectedWarehouseId, reporteInicio, reporteFin); 
+        // ✨ AHORA ENVÍA EL ID DE LA SUCURSAL
+        const res = await obtenerReporteCompras(selectedBranchId, reporteInicio, reporteFin); 
         if (res.success) setDatosReporte(res.data);
         else alert("Error al generar el reporte.");
         setCargandoReporte(false);
     };
 
-    const WarehouseSelector = () => (
+    // ✨ SELECTOR CORREGIDO A SUCURSALES
+    const BranchSelector = () => (
         <div className="flex items-center gap-3 bg-white px-4 py-2 rounded-lg border border-gray-200 shadow-sm w-full sm:w-auto">
-            <Package className="w-4 h-4 text-gray-500 shrink-0" />
-            <span className="text-sm font-semibold text-gray-700 hidden md:inline">Almacén:</span>
+            <Building2 className="w-4 h-4 text-gray-500 shrink-0" />
+            <span className="text-sm font-semibold text-gray-700 hidden md:inline">Sucursal:</span>
             <select 
                 className="bg-transparent text-sm font-bold text-slate-800 outline-none cursor-pointer w-full max-w-[250px] truncate"
-                value={selectedWarehouseId}
-                onChange={(e) => setSelectedWarehouseId(Number(e.target.value))}
+                value={selectedBranchId}
+                onChange={(e) => setSelectedBranchId(Number(e.target.value))}
             >
-                {almacenes.map(w => (
-                    <option key={w.id} value={w.id}>{w.name} | {w.branch_name}</option>
+                {branches.map(b => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
                 ))}
             </select>
         </div>
@@ -131,7 +121,8 @@ export default function PurchaseRequestsClient({
             <p className="text-sm text-muted-foreground">Gestione requerimientos, analice inventario y revise reportes.</p>
           </div>
           {activeTab === 'solicitudes' && (
-              <div className="w-full sm:w-auto">
+              <div className="w-full sm:w-auto flex flex-col sm:flex-row items-center gap-3">
+                  <BulkRequestDialog branches={branches} userBranchId={userBranchId} />
                   <RequestFormSheet userBranchId={userBranchId} userRole={userRole} />
               </div>
           )}
@@ -148,10 +139,9 @@ export default function PurchaseRequestsClient({
 
         {activeTab === 'solicitudes' && (
             <>
-                {/* Nota: Le pasamos los almacenes a los filtros para que el dropdown de filtrado también use almacenes */}
                 <PurchaseRequestFilters 
                     onFilterChange={loadData} 
-                    branches={almacenes} 
+                    branches={branches} 
                     availableRequests={initialRequests} 
                     userRole={userRole} 
                 />
@@ -173,11 +163,12 @@ export default function PurchaseRequestsClient({
                         <Table>
                         <TableHeader>
                             <TableRow className="bg-gray-50 hover:bg-gray-50 border-b border-gray-100">
-                            <TableHead className="w-[100px] pl-6">Código</TableHead>
-                            <TableHead className="w-[140px]">Fecha</TableHead>
-                            {/* ✨ ACTUALIZADO: Dice Almacén */}
+                            <TableHead className="w-[100px] pl-6">Req / Cód</TableHead>
+                            <TableHead className="w-[120px]">Fecha</TableHead>
                             <TableHead>Almacén / Solicitante</TableHead>
-                            <TableHead className="w-[30%]">Descripción</TableHead>
+                            <TableHead className="w-[20%]">Descripción</TableHead>
+                            <TableHead>Categoría / Tipo</TableHead>
+                            <TableHead>Presentación</TableHead>
                             <TableHead className="text-right">Monto Est.</TableHead>
                             <TableHead className="text-center">Estado</TableHead>
                             <TableHead className="text-right w-[50px] pr-6"></TableHead>
@@ -191,7 +182,12 @@ export default function PurchaseRequestsClient({
                                 return (
                                     <TableRow key={req.id} className="group transition-colors hover:bg-blue-50/40 border-b border-gray-50 last:border-0">
                                         <TableCell className="pl-6 font-mono text-xs font-medium text-gray-500">
-                                        REQ-{req.id.toString().padStart(6, '0')}
+                                            <div>REQ-{req.id.toString().padStart(6, '0')}</div>
+                                            {req.product_code && (
+                                                <div className="text-[10px] text-emerald-600 font-bold mt-0.5">
+                                                    Cód: {req.product_code}
+                                                </div>
+                                            )}
                                         </TableCell>
                                         
                                         <TableCell>
@@ -203,10 +199,9 @@ export default function PurchaseRequestsClient({
                                         
                                         <TableCell>
                                         <div className="flex flex-col gap-1">
-                                            {/* ✨ ACTUALIZADO: Muestra el nombre del almacén */}
                                             <span className="font-semibold text-gray-800 text-xs flex items-center gap-1">
                                                 <Package className="w-3 h-3 text-blue-500 shrink-0" /> 
-                                                <span className="truncate max-w-[200px]" title={req.warehouse_name || req.branch_name}>
+                                                <span className="truncate max-w-[150px]" title={req.warehouse_name || req.branch_name}>
                                                     {req.warehouse_name || req.branch_name}
                                                 </span>
                                             </span>
@@ -239,6 +234,19 @@ export default function PurchaseRequestsClient({
                                             )}
                                         </div>
                                         </TableCell>
+
+                                        <TableCell>
+                                            <div className="flex flex-col gap-1">
+                                                <span className="text-xs font-bold text-slate-700">{req.category || '-'}</span>
+                                                <span className="text-[10px] uppercase font-semibold text-slate-500">{req.product_type || '-'}</span>
+                                            </div>
+                                        </TableCell>
+
+                                        <TableCell>
+                                            <span className="text-xs text-gray-600 font-medium bg-gray-100 px-2 py-1 rounded-md border border-gray-200">
+                                                {req.presentation || '-'}
+                                            </span>
+                                        </TableCell>
                                         
                                         <TableCell className="text-right font-medium text-gray-900">
                                         {money(req.estimated_total, req.currency)}
@@ -262,7 +270,7 @@ export default function PurchaseRequestsClient({
                             
                             {requests.length === 0 && (
                             <TableRow>
-                                <TableCell colSpan={7} className="text-center py-24 text-gray-500">
+                                <TableCell colSpan={9} className="text-center py-24 text-gray-500">
                                 <div className="flex flex-col items-center justify-center gap-4">
                                     <div className="h-16 w-16 bg-gray-50 rounded-full flex items-center justify-center">
                                         <FileText className="w-8 h-8 text-gray-300" />
@@ -295,10 +303,10 @@ export default function PurchaseRequestsClient({
                     </div>
                     
                     <div className="flex flex-col sm:flex-row items-center gap-4 w-full md:w-auto">
-                        <WarehouseSelector />
+                        <BranchSelector />
                         <button 
                             onClick={handleGenerarPrediccion} 
-                            disabled={cargandoPrediccion || !selectedWarehouseId} 
+                            disabled={cargandoPrediccion || !selectedBranchId} 
                             className="w-full sm:w-auto bg-blue-600 text-white px-6 py-2.5 rounded-lg font-semibold hover:bg-blue-700 shadow-sm transition-all disabled:opacity-50 flex items-center justify-center gap-2"
                         >
                             <RefreshCw className={`w-4 h-4 ${cargandoPrediccion ? 'animate-spin' : ''}`} />
@@ -314,6 +322,8 @@ export default function PurchaseRequestsClient({
                                 <TableHeader>
                                     <TableRow className="bg-gray-50 border-b border-gray-200">
                                         <TableHead className="p-4 font-semibold text-slate-700 pl-6">Producto</TableHead>
+                                        {/* ✨ COLUMNA AÑADIDA PARA VER A QUÉ ALMACÉN DE LA SUCURSAL PERTENECE */}
+                                        <TableHead className="p-4 font-semibold text-slate-700">Almacén / Ubicación</TableHead>
                                         <TableHead className="p-4 font-semibold text-slate-700 text-center">Stock Actual</TableHead>
                                         <TableHead className="p-4 font-semibold text-slate-700 text-center">Consumo Diario</TableHead>
                                         <TableHead className="p-4 font-semibold text-slate-700 text-center">Punto Reorden</TableHead>
@@ -323,17 +333,20 @@ export default function PurchaseRequestsClient({
                                 </TableHeader>
                                 <TableBody>
                                     {datosPrediccion.length === 0 ? (
-                                        <TableRow><TableCell colSpan={6} className="p-12 text-center text-gray-500">Selecciona un almacén y haz clic en "Analizar Inventario".</TableCell></TableRow>
+                                        <TableRow><TableCell colSpan={7} className="p-12 text-center text-gray-500">Selecciona una sucursal y haz clic en "Analizar Inventario".</TableCell></TableRow>
                                     ) : (
                                         datosPrediccion.map((row: any, i: number) => (
                                             <TableRow key={i} className="hover:bg-gray-50 transition-colors border-b border-gray-100 last:border-0">
                                                 <TableCell className="p-4 font-semibold text-slate-800 pl-6">{row.nombre}</TableCell>
+                                                <TableCell className="p-4 text-xs font-medium text-slate-600">
+                                                    {row.almacen || row.warehouse_name || row.almacen_nombre || 'General'}
+                                                </TableCell>
                                                 <TableCell className="p-4 text-center font-mono text-slate-600">{row.stock_actual}</TableCell>
                                                 <TableCell className="p-4 text-center text-slate-500 text-xs">{Number(row.consumo_diario).toFixed(2)} / día</TableCell>
                                                 <TableCell className="p-4 text-center font-mono text-slate-400">{row.punto_reorden}</TableCell>
                                                 <TableCell className="p-4 text-center">
                                                     <div className="flex justify-center">
-                                                        {row.estado.includes('COMPRAR') ? (
+                                                        {row.estado?.includes('COMPRAR') ? (
                                                             <div className="flex items-center gap-1.5 px-2.5 py-1 bg-red-50 text-red-700 rounded-md border border-red-100">
                                                                 <AlertCircle className="w-3.5 h-3.5" />
                                                                 <span className="text-[11px] font-bold uppercase">Reponer</span>
@@ -367,11 +380,11 @@ export default function PurchaseRequestsClient({
                         <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
                             <BarChart3 className="w-5 h-5 text-slate-500"/> Reporte de Órdenes
                         </h2>
-                        <p className="text-sm text-slate-500 font-medium mt-1">Consolida las órdenes de compra y el dinero invertido por almacén.</p>
+                        <p className="text-sm text-slate-500 font-medium mt-1">Consolida las órdenes de compra y el dinero invertido por sucursal.</p>
                     </div>
                     
                     <div className="flex flex-col md:flex-row items-center gap-3 w-full xl:w-auto">
-                        <WarehouseSelector />
+                        <BranchSelector />
                         
                         <div className="flex items-center gap-2 bg-white p-1.5 rounded-lg border border-slate-200 shadow-sm w-full md:w-auto">
                             <div className="flex items-center gap-2 px-2">
@@ -387,7 +400,7 @@ export default function PurchaseRequestsClient({
 
                         <button 
                             onClick={handleGenerarReporte} 
-                            disabled={cargandoReporte || !selectedWarehouseId} 
+                            disabled={cargandoReporte || !selectedBranchId} 
                             className="w-full md:w-auto bg-slate-800 text-white px-6 py-2.5 rounded-lg font-semibold hover:bg-slate-900 shadow-sm transition-all disabled:opacity-50 flex items-center justify-center gap-2"
                         >
                             <FileText className="w-4 h-4" />
@@ -416,7 +429,7 @@ export default function PurchaseRequestsClient({
                                     ) : (
                                         datosReporte.map((row: any, i: number) => (
                                             <TableRow key={i} className="hover:bg-slate-50 transition-colors border-b border-gray-100 last:border-0">
-                                                <TableCell className="font-mono text-slate-500 text-xs pl-6">OC-{row.orden_id.toString().padStart(6, '0')}</TableCell>
+                                                <TableCell className="font-mono text-slate-500 text-xs pl-6">OC-{row.orden_id?.toString().padStart(6, '0')}</TableCell>
                                                 <TableCell className="text-center text-sm">{formatDate(row.fecha_emision)}</TableCell>
                                                 <TableCell className="font-semibold text-slate-800">{row.proveedor}</TableCell>
                                                 <TableCell className="text-center">
