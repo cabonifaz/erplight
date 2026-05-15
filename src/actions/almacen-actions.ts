@@ -260,38 +260,38 @@ export async function obtenerAlmacenesPermitidosGlobal() {
 
     const connection = await pool.getConnection();
     try {
-        // 1. GERENTES: Ven absolutamente todos los almacenes del ERP
+        // 1. GERENTES: Ven absolutamente todos los almacenes del ERP (que pertenezcan a sucursales activas)
         if (['GERENTE GENERAL', 'ADMINISTRADOR GENERAL', 'GERENTE DE LOGISTICA', 'CEO'].includes(role)) {
             const [rows]: any = await connection.query(`
                 SELECT w.id, w.name, b.name as branch_name, w.branch_id
                 FROM warehouses w
                 JOIN branches b ON w.branch_id = b.id
-                WHERE w.status = 1
+                WHERE w.status = 1 AND b.status = 1
                 ORDER BY b.name ASC, w.name ASC
             `);
             return { success: true, data: rows };
         }
 
-        // 2. ADMIN SUCURSAL: Ve todos los almacenes que pertenezcan a su(s) sucursal(es) asignada(s)
+        // 2. ADMIN SUCURSAL: Ve todos los almacenes de su(s) sucursal(es) asignada(s) (siempre que sigan activas)
         if (['ADMIN_SUCURSAL'].includes(role)) {
             const [rows]: any = await connection.query(`
                 SELECT w.id, w.name, b.name as branch_name, w.branch_id
                 FROM warehouses w
                 JOIN branches b ON w.branch_id = b.id
                 JOIN user_branches ub ON b.id = ub.branch_id
-                WHERE ub.user_id = ? AND w.status = 1
+                WHERE ub.user_id = ? AND w.status = 1 AND b.status = 1
                 ORDER BY b.name ASC, w.name ASC
             `, [userId]);
             return { success: true, data: rows };
         }
 
-        // 3. ALMACENEROS: Ven SOLO los almacenes físicos que se les asignó con la llavecita
+        // 3. ALMACENEROS: Ven SOLO los almacenes físicos asignados (que pertenezcan a sucursales activas)
         const [rows]: any = await connection.query(`
             SELECT w.id, w.name, b.name as branch_name, w.branch_id
             FROM warehouses w
             JOIN branches b ON w.branch_id = b.id
             JOIN user_warehouses uw ON w.id = uw.warehouse_id
-            WHERE uw.user_id = ? AND w.status = 1
+            WHERE uw.user_id = ? AND w.status = 1 AND b.status = 1
             ORDER BY b.name ASC, w.name ASC
         `, [userId]);
         

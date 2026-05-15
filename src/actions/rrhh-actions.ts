@@ -216,13 +216,14 @@ export async function verificarEstadoKiosko(documento: string) {
 }
 
 // 11. OBTENER LISTA DE SUCURSALES (CON FILTRO DE SEGURIDAD BLINDADO)
+// 11. OBTENER LISTA DE SUCURSALES (CON FILTRO DE SEGURIDAD BLINDADO)
 export async function obtenerSucursales() {
     const session = await auth();
     if (!session?.user) return { success: false, data: [], defaultBranchId: 1 };
 
     const sessionUser = session.user as any;
     
-    // ✨ 1. Extraemos el ID del usuario de forma segura (Igual que en el Dashboard)
+    // Extraemos el ID del usuario de forma segura
     const userId = sessionUser.id || sessionUser.sub || sessionUser.userId || sessionUser.id_usuario;
     const role = sessionUser.role?.toUpperCase().trim() || "";
 
@@ -230,27 +231,33 @@ export async function obtenerSucursales() {
     try {
         const PRIVILEGED_ROLES = ["GERENTE GENERAL", "ADMINISTRADOR GENERAL", "JEFE DE RRHH"];
         
-        // ✨ 2. Si es Gerente o Jefe, buscamos TODAS las sucursales directamente
+        // ✨ 1. Si es Gerente o Jefe, buscamos solo sucursales ACTIVAS
         if (PRIVILEGED_ROLES.includes(role)) {
-            const [todasLasSucursales]: any = await connection.query("SELECT id, name FROM branches");
-            return { success: true, data: todasLasSucursales || [], defaultBranchId: 1 };
+            const [todasLasSucursales]: any = await connection.query(
+                "SELECT id, name FROM branches WHERE status = 1 ORDER BY name ASC"
+            );
+            return { 
+                success: true, 
+                data: todasLasSucursales || [], 
+                defaultBranchId: todasLasSucursales.length > 0 ? todasLasSucursales[0].id : 1 
+            };
         }
 
-        // ✨ 3. Si es ADMIN_SUCURSAL, buscamos su sede real cruzando las tablas (Sin usar SPs)
+        // ✨ 2. Si es ADMIN_SUCURSAL, buscamos su sede asignada asegurando que esté ACTIVA
         const [userBranches]: any = await connection.query(
             `SELECT DISTINCT b.id, b.name 
              FROM user_branches ub 
              JOIN branches b ON ub.branch_id = b.id 
-             WHERE ub.user_id = ?`, 
+             WHERE ub.user_id = ? AND b.status = 1
+             ORDER BY b.name ASC`, 
             [userId]
         );
 
-        // Si encontramos su sucursal, se la enviamos al frontend
         if (userBranches && userBranches.length > 0) {
             return { 
                 success: true, 
                 data: userBranches, 
-                defaultBranchId: userBranches[0].id // Forzamos a que cargue esta sede al iniciar
+                defaultBranchId: userBranches[0].id 
             };
         }
 

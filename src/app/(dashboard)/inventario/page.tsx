@@ -9,7 +9,7 @@ import { InventoryFilters } from "@/components/modules/inventario/inventory-filt
 
 interface SearchParamsType {
     query?: string;
-    warehouseId?: string; // ✨ CAMBIADO a warehouseId
+    warehouseId?: string; 
     minStock?: string;
     maxStock?: string;
     dateFrom?: string;
@@ -25,22 +25,29 @@ export default async function InventoryPage(props: {
     const userRole = session?.user?.role?.toUpperCase() || "";
     const userId = session?.user?.id;
 
-    // ✨ NUEVA LÓGICA: Obtenemos el o los almacenes a los que el usuario tiene acceso
     let warehouses: any[] = [];
     let userDefaultWarehouseId = 0;
     
     if (userId) {
         try {
             if (['GERENTE GENERAL', 'ADMINISTRADOR GENERAL', 'GERENTE DE LOGISTICA'].includes(userRole)) {
-                const [wRows]: any = await pool.query("SELECT id, name FROM warehouses WHERE status = 1");
+                // ✨ CORRECCIÓN 1: Unimos con branches y verificamos que la sucursal esté activa
+                const [wRows]: any = await pool.query(`
+                    SELECT w.id, w.name 
+                    FROM warehouses w 
+                    JOIN branches b ON w.branch_id = b.id 
+                    WHERE w.status = 1 AND b.status = 1
+                `);
                 warehouses = wRows;
             } else {
-                const [wRows]: any = await pool.query(
-                    `SELECT w.id, w.name 
-                     FROM warehouses w
-                     JOIN user_warehouses uw ON w.id = uw.warehouse_id
-                     WHERE uw.user_id = ? AND w.status = 1`, [userId]
-                );
+                // ✨ CORRECCIÓN 2: Hacemos lo mismo para el resto de los roles
+                const [wRows]: any = await pool.query(`
+                    SELECT w.id, w.name 
+                    FROM warehouses w
+                    JOIN user_warehouses uw ON w.id = uw.warehouse_id
+                    JOIN branches b ON w.branch_id = b.id
+                    WHERE uw.user_id = ? AND w.status = 1 AND b.status = 1
+                `, [userId]);
                 warehouses = wRows;
             }
             if (warehouses.length > 0) userDefaultWarehouseId = warehouses[0].id;
@@ -67,9 +74,8 @@ export default async function InventoryPage(props: {
     const max_stock = searchParams.maxStock ? Number(searchParams.maxStock) : null;
     const updated_from = searchParams.dateFrom || null;
 
-    // ✨ ACTUALIZADO: El SP en base de datos ya sabe que esto es el ID del almacén
     const stocks = await getInventoryStocks({
-        branch_id: finalWarehouseId, // En el backend, esto se mapeará al warehouse_id 
+        branch_id: finalWarehouseId, 
         search,
         min_stock,
         max_stock,
@@ -103,7 +109,7 @@ export default async function InventoryPage(props: {
             </div>
 
             <InventoryFilters 
-                branches={warehouses} // ✨ Le pasamos los almacenes, no las sucursales
+                branches={warehouses} 
                 products={productsList} 
                 userBranchId={userDefaultWarehouseId}
                 userRole={userRole}
@@ -113,7 +119,7 @@ export default async function InventoryPage(props: {
                 {userRole !== 'ALMACENERO' && (
                     <>
                         <InventoryActionsButton 
-                            branches={warehouses} // ✨ Le pasamos los almacenes
+                            branches={warehouses} 
                             userRole={userRole} 
                             userBranchId={userDefaultWarehouseId} 
                             productos={stocks} 
