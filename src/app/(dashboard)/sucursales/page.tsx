@@ -63,7 +63,7 @@ export default function SucursalesPage() {
 
             {/* Formulario para crear sucursal */}
             <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
-                <h2 className="text-lg font-semibold mb-4">nunca Sucursal</h2>
+                <h2 className="text-lg font-semibold mb-4">Nueva Sucursal</h2>
                 <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">Nombre del Local</label>
