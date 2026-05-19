@@ -531,9 +531,23 @@ export async function registerReception(formData: FormData): Promise<ActionState
 
         for (const item of items) {
             const rawName = (item.product_name || item.name || "Producto").trim();
-            const qty = parseFloat(item.quantity);
-            const uom = item.unit_measure || item.uom || 'UND';
+            // Declaramos let en lugar de const para permitir la mutación de los datos
+            let qty = parseFloat(item.quantity);
+            let uom = item.unit_measure || item.uom || 'UND'; 
+            
             if (qty <= 0) continue;
+
+            // ==============================================================================
+            // INTERCEPTOR DE CONVERSIÓN DE UNIDADES (LOGÍSTICA -> INVENTARIO BASE)
+            // ==============================================================================
+            if (uom === 'KG') {
+                qty = qty * 1000;  // Multiplicador del factor de conversión
+                uom = 'GR';        // Reescritura a la unidad base de kárdex
+            } else if (uom === 'L') {
+                qty = qty * 1000;
+                uom = 'ML';
+            }
+            // ==============================================================================
 
             await pool.query(
                 "CALL sp_procesar_recepcion_item(?, ?, ?, ?, ?, ?, ?, ?)",
@@ -545,14 +559,6 @@ export async function registerReception(formData: FormData): Promise<ActionState
         return { success: true, message: "Recepción registrada correctamente." };
     } catch (error: any) { return { success: false, message: error.message }; }
 }
-
-export async function getRequestReceptions(requestId: number) {
-    try {
-        const [rows]: any = await pool.query("CALL sp_obtener_recepciones_solicitud(?)", [requestId]);
-        return rows[0];
-    } catch (error) { return []; }
-}
-
 // ==============================================================================
 // 5. GESTIÓN DE ORDEN DE COMPRA
 // ==============================================================================
