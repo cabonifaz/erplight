@@ -79,13 +79,15 @@ export function RegisterReceptionDialog({ requestId, open, onOpenChange, onSucce
         return () => clearTimeout(delayDebounceFn);
     }, [searchTerm]);
 
-    const handleAddItem = (product: any) => {
+   const handleAddItem = (product: any) => {
         if (items.find(i => i.product_id === product.id)) {
             toast.error("Producto ya listado.");
             return;
         }
-        // Agregamos con la unidad del producto si existe, o la seleccionada
-        const finalUom = product.unit_measure || uomInput;
+        
+        // ¡CORRECCIÓN AQUÍ!
+        // Ignoramos la unidad de la BD y forzamos la que seleccionaste en el dropdown
+        const finalUom = uomInput; 
         
         setItems([...items, { 
             product_id: product.id, 
@@ -98,6 +100,9 @@ export function RegisterReceptionDialog({ requestId, open, onOpenChange, onSucce
         setSearchTerm("");
         setSearchResults([]);
         setQtyInput(1);
+        
+        // Un buen detalle UX: Puedes dejar que uomInput se resetee a "UND" 
+        // o quitar esta línea de abajo si quieres que recuerde que estabas metiendo "KG"
         setUomInput("UND"); 
     };
 
