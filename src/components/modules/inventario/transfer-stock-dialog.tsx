@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Loader2, ArrowRightLeft } from "lucide-react";
-import { transferirStockSucursal } from "@/actions/inventory-actions"; // Asegúrate de que la ruta sea correcta
+import { transferirStockSucursal } from "@/actions/inventory-actions"; 
 
 export function TransferStockDialog({ 
     isOpen, 
@@ -58,8 +58,8 @@ export function TransferStockDialog({
         setLoading(false);
     };
 
-    // Filtramos para no poder enviarnos stock a nosotros mismos
-    const sucursalesDestino = sucursales.filter(s => s.id !== sucursalActualId);
+    // ✨ CORRECCIÓN AQUÍ: Forzamos la conversión a Number() para evitar fallos de tipos (String vs Int)
+    const sucursalesDestino = sucursales.filter(s => Number(s.id) !== Number(sucursalActualId));
 
     return (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>

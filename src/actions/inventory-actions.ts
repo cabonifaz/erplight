@@ -288,3 +288,20 @@ export async function buscarProductoEnAlmacen(warehouseId: number, searchTerm: s
         connection.release();
     }
 }
+
+export async function reasignarAlmacenFisico(stockId: number, nuevoWarehouseId: number) {
+    const connection = await pool.getConnection();
+    try {
+        // Actualizamos directamente el ID del registro específico (blindado y seguro)
+        await connection.query(
+            "UPDATE product_stocks SET warehouse_id = ? WHERE id = ?",
+            [nuevoWarehouseId, stockId]
+        );
+        revalidatePath("/inventario/almacenes"); // Asegúrate de que la ruta coincida con tu página
+        return { success: true, message: "Producto reubicado exitosamente." };
+    } catch (error: any) {
+        return { success: false, message: "Error al reubicar: " + error.message };
+    } finally {
+        connection.release();
+    }
+}

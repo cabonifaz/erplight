@@ -9,7 +9,7 @@ import { InventoryFilters } from "@/components/modules/inventario/inventory-filt
 
 interface SearchParamsType {
     query?: string;
-    warehouseId?: string; 
+    branch_id?: string; 
     minStock?: string;
     maxStock?: string;
     dateFrom?: string;
@@ -25,33 +25,29 @@ export default async function InventoryPage(props: {
     const userRole = session?.user?.role?.toUpperCase() || "";
     const userId = session?.user?.id;
 
-    let warehouses: any[] = [];
-    let userDefaultWarehouseId = 0;
+    let branches: any[] = [];
+    let userDefaultBranchId = 0;
     
     if (userId) {
         try {
             if (['GERENTE GENERAL', 'ADMINISTRADOR GENERAL', 'GERENTE DE LOGISTICA'].includes(userRole)) {
-                // ✨ CORRECCIÓN 1: Unimos con branches y verificamos que la sucursal esté activa
-                const [wRows]: any = await pool.query(`
-                    SELECT w.id, w.name 
-                    FROM warehouses w 
-                    JOIN branches b ON w.branch_id = b.id 
-                    WHERE w.status = 1 AND b.status = 1
+                const [bRows]: any = await pool.query(`
+                    SELECT id, name 
+                    FROM branches 
+                    WHERE status = 1
                 `);
-                warehouses = wRows;
+                branches = bRows;
             } else {
-                // ✨ CORRECCIÓN 2: Hacemos lo mismo para el resto de los roles
-                const [wRows]: any = await pool.query(`
-                    SELECT w.id, w.name 
-                    FROM warehouses w
-                    JOIN user_warehouses uw ON w.id = uw.warehouse_id
-                    JOIN branches b ON w.branch_id = b.id
-                    WHERE uw.user_id = ? AND w.status = 1 AND b.status = 1
+                const [bRows]: any = await pool.query(`
+                    SELECT b.id, b.name 
+                    FROM branches b
+                    JOIN user_branches ub ON b.id = ub.branch_id
+                    WHERE ub.user_id = ? AND b.status = 1
                 `, [userId]);
-                warehouses = wRows;
+                branches = bRows;
             }
-            if (warehouses.length > 0) userDefaultWarehouseId = warehouses[0].id;
-        } catch (error) { console.error("Error obteniendo almacenes", error); }
+            if (branches.length > 0) userDefaultBranchId = branches[0].id;
+        } catch (error) { console.error("Error obteniendo sedes", error); }
     }
 
     const [productsResult]: any = await pool.query("CALL sp_listar_productos()");
@@ -59,14 +55,31 @@ export default async function InventoryPage(props: {
 
     const isRestricted = !['GERENTE GENERAL', 'GERENTE DE LOGISTICA', 'ADMINISTRADOR GENERAL'].includes(userRole);
 
-    let finalWarehouseId = null;
+    let finalBranchId = null;
 
     if (isRestricted) {
-        finalWarehouseId = userDefaultWarehouseId;
+        finalBranchId = userDefaultBranchId;
     } else {
-        finalWarehouseId = searchParams.warehouseId && searchParams.warehouseId !== "ALL" 
-            ? Number(searchParams.warehouseId) 
+        finalBranchId = searchParams.branch_id && searchParams.branch_id !== "ALL" 
+            ? Number(searchParams.branch_id) 
             : null;
+    }
+
+    // ✨ NUEVA CONSULTA: Obtenemos los Almacenes Físicos de la sede actual para pasarlos a la tabla
+    const currentBranchIdForWarehouses = finalBranchId || userDefaultBranchId;
+    let physicalWarehouses: any[] = [];
+    
+    if (currentBranchIdForWarehouses) {
+        try {
+            const [wRows]: any = await pool.query(`
+                SELECT id, name 
+                FROM warehouses 
+                WHERE branch_id = ? AND status = 1
+            `, [currentBranchIdForWarehouses]);
+            physicalWarehouses = wRows;
+        } catch (error) { 
+            console.error("Error obteniendo almacenes físicos", error); 
+        }
     }
 
     const search = searchParams.query || null;
@@ -75,7 +88,7 @@ export default async function InventoryPage(props: {
     const updated_from = searchParams.dateFrom || null;
 
     const stocks = await getInventoryStocks({
-        branch_id: finalWarehouseId, 
+        branch_id: finalBranchId, 
         search,
         min_stock,
         max_stock,
@@ -89,10 +102,10 @@ export default async function InventoryPage(props: {
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div className="flex flex-col gap-1">
                     <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-                        <Package className="w-6 h-6 text-blue-600" />
-                        Inventario Inteligente Multi-Almacén
+                        <Package className="w-6 h-6 text-primary" />
+                        Inventario Inteligente Global
                     </h1>
-                    <p className="text-gray-500 text-sm">Monitoreo de existencias y caducidad por almacén físico.</p>
+                    <p className="text-gray-500 text-sm">Monitoreo de existencias y control unificado por sede principal.</p>
                 </div>
                 
                 <div className="flex gap-3">
@@ -109,9 +122,9 @@ export default async function InventoryPage(props: {
             </div>
 
             <InventoryFilters 
-                branches={warehouses} 
+                branches={branches} 
                 products={productsList} 
-                userBranchId={userDefaultWarehouseId}
+                userBranchId={finalBranchId || userDefaultBranchId}
                 userRole={userRole}
             />
 
@@ -119,9 +132,9 @@ export default async function InventoryPage(props: {
                 {userRole !== 'ALMACENERO' && (
                     <>
                         <InventoryActionsButton 
-                            branches={warehouses} 
+                            branches={branches} 
                             userRole={userRole} 
-                            userBranchId={userDefaultWarehouseId} 
+                            userBranchId={finalBranchId || userDefaultBranchId} 
                             productos={stocks} 
                         />
                         <div className="h-6 w-px bg-gray-200 mx-1"></div>
@@ -135,10 +148,11 @@ export default async function InventoryPage(props: {
             
             <Card className="shadow-sm border-gray-200">
                 <CardHeader className="bg-gray-50/50 border-b pb-4">
-                    <CardTitle className="text-base font-medium text-gray-700">Tablero de Existencias</CardTitle>
+                    <CardTitle className="text-base font-medium text-gray-700">Tablero de Existencias Globales</CardTitle>
                 </CardHeader>
                 <CardContent className="p-0">
-                    <InventoryTable stocks={stocks} />
+                    {/* ✨ CORRECCIÓN FINAL: Le pasamos los sub-almacenes a la tabla */}
+                    <InventoryTable stocks={stocks} almacenes={physicalWarehouses} />
                 </CardContent>
             </Card>
         </div>
