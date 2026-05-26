@@ -559,14 +559,6 @@ export async function registerReception(formData: FormData): Promise<ActionState
         return { success: true, message: "Recepción registrada correctamente." };
     } catch (error: any) { return { success: false, message: error.message }; }
 }
-
-export async function getRequestReceptions(requestId: number) {
-    try {
-        const [rows]: any = await pool.query("CALL sp_obtener_recepciones_solicitud(?)", [requestId]);
-        return rows[0];
-    } catch (error) { return []; }
-}
-
 // ==============================================================================
 // 5. GESTIÓN DE ORDEN DE COMPRA
 // ==============================================================================
