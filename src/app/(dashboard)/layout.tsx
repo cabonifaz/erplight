@@ -13,7 +13,7 @@ export default async function DashboardLayout({
 }) {
   const session = await auth();
   
-  const logoRutaActual = "/mr_sushi_logo.webp"; 
+
 
   return (
     <div className="min-h-screen bg-gray-50">

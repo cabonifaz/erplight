@@ -73,14 +73,22 @@ export function Sidebar({ user }: { user?: any }) {
   // ✨ ESTADO PARA LOS PERMISOS DINÁMICOS
   const [allowedMenus, setAllowedMenus] = useState<string[] | null>(null);
 
-  useEffect(() => {
-      const fetchData = async () => {
-          // Cargar el Logo
-          const resLogo = await getLogoUrl();
-          if (resLogo.success && resLogo.url) {
-              setLogoUrl(resLogo.url);
-          }
-
+  // Busca este bloque en tu useEffect y cámbialo:
+useEffect(() => {
+    const fetchData = async () => {
+        // Cargar el Logo
+        try {
+            const resLogo = await getLogoUrl();
+            // FORZAMOS QUE SI EL LOGO ES DE MR SUSHI O NO CARGA, NO SE MUESTRE NADA
+            if (resLogo.success && resLogo.url && !resLogo.url.includes("mr_sushi")) {
+                setLogoUrl(resLogo.url);
+            } else {
+                setLogoUrl(""); // Dejamos vacío si no es un logo válido
+            }
+        } catch (e) {
+            setLogoUrl("");
+        }
+        
           // ✨ Cargar los permisos desde la Base de Datos según el ROL
           if (user?.role) {
               const resPermisos = await getPermisosMenu(user.role.toUpperCase().trim());
@@ -181,19 +189,19 @@ export function Sidebar({ user }: { user?: any }) {
     <aside className="w-64 bg-white border-r border-gray-200 hidden md:flex flex-col h-screen fixed left-0 top-0 z-10">
       
       <div className="h-16 flex items-center justify-center px-4 border-b border-gray-200">
-          {logoUrl ? (
-              <Image 
-                  src={logoUrl} 
-                  alt="Logo Empresa" 
-                  width={200}        
-                  height={55}        
-                  className="object-contain max-h-[60px] w-auto" 
-                  priority 
-              />
-          ) : (
-              <span className="text-xl font-bold text-blue-700"></span>
-          )}
-      </div>
+    {logoUrl ? (
+        <Image 
+            src={logoUrl} 
+            alt="Logo Empresa" 
+            width={200} height={55} 
+            className="object-contain max-h-[60px] w-auto" 
+            priority 
+        />
+    ) : (
+        // ESTO ES LO QUE VERÁ PRICILLA: UN TÍTULO CORPORATIVO LIMPIO
+        <span className="text-xl font-bold text-blue-700 tracking-tight">GTERP Light</span>
+    )}
+</div>
       
       <div className="p-3 pb-0">
         <div className="relative">

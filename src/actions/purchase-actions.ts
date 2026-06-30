@@ -709,3 +709,19 @@ export async function searchProvidersAction(query: string) {
         return rows[0];
     } catch (error) { return []; }
 }
+
+export async function getRequestReceptions(requestId: number) {
+    const connection = await pool.getConnection();
+    try {
+        const [rows] = await connection.query(
+            "SELECT * FROM purchase_receptions WHERE request_id = ? ORDER BY created_at DESC",
+            [requestId]
+        );
+        return { success: true, data: rows };
+    } catch (error: any) {
+        console.error("Error obteniendo recepciones:", error);
+        return { success: false, data: [] };
+    } finally {
+        connection.release();
+    }
+}
