@@ -710,17 +710,18 @@ export async function searchProvidersAction(query: string) {
     } catch (error) { return []; }
 }
 
-export async function getRequestReceptions(requestId: number) {
+// ✅ CÓDIGO CORREGIDO (retorna array, igual que el resto de funciones)
+export async function getRequestReceptions(requestId: number): Promise<any[]> {
     const connection = await pool.getConnection();
     try {
-        const [rows] = await connection.query(
+        const [rows]: any = await connection.query(
             "SELECT * FROM purchase_receptions WHERE request_id = ? ORDER BY created_at DESC",
             [requestId]
         );
-        return { success: true, data: rows };
+        return rows || [];    // ← devuelve array directamente
     } catch (error: any) {
         console.error("Error obteniendo recepciones:", error);
-        return { success: false, data: [] };
+        return [];            // ← devuelve array vacío en error
     } finally {
         connection.release();
     }
