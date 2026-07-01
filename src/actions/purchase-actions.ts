@@ -710,18 +710,19 @@ export async function searchProvidersAction(query: string) {
     } catch (error) { return []; }
 }
 
-// ✅ CÓDIGO CORREGIDO (retorna array, igual que el resto de funciones)
+// ✅ CORRECTO: usa el SP que ya hace el JOIN con users
 export async function getRequestReceptions(requestId: number): Promise<any[]> {
     const connection = await pool.getConnection();
     try {
         const [rows]: any = await connection.query(
-            "SELECT * FROM purchase_receptions WHERE request_id = ? ORDER BY created_at DESC",
+            "CALL sp_obtener_recepciones_solicitud(?)",
             [requestId]
         );
-        return rows || [];    // ← devuelve array directamente
+        // Los SP en MySQL devuelven resultado en [0]
+        return rows[0] || [];
     } catch (error: any) {
         console.error("Error obteniendo recepciones:", error);
-        return [];            // ← devuelve array vacío en error
+        return [];
     } finally {
         connection.release();
     }
