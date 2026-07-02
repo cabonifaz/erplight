@@ -11,7 +11,7 @@ export async function createProduct(formData: FormData) {
 
     const role = session.user.role?.toUpperCase() || "";
     // Validación de roles permitidos
-    const ALLOWED_ROLES = ['LOGISTICA', 'ADMINISTRADOR GENERAL', 'CEO'];
+    const ALLOWED_ROLES = ['LOGISTICA', 'ADMINISTRADOR GENERAL', 'CEO', 'GERENTE GENERAL'];
 
     if (!ALLOWED_ROLES.includes(role)) {
         return { success: false, message: "⛔ No tienes permisos para crear productos." };
@@ -73,4 +73,19 @@ export async function getProducts() {
     console.error("Error al listar productos:", error);
     return [];
   }
+}
+
+// --- OBTENER UNIDADES DE MEDIDA DEL CATÁLOGO ---
+export async function getUnitMeasures() {
+    try {
+        const [rows]: any = await pool.query(`
+            SELECT code, description 
+            FROM master_catalogs 
+            WHERE category = 'UNIT_MEASURE' AND status = 1
+        `);
+        return { success: true, data: rows };
+    } catch (error) {
+        console.error("Error obteniendo unidades de medida:", error);
+        return { success: false, data: [] };
+    }
 }

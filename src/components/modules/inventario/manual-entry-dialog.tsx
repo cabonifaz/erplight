@@ -7,9 +7,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, Save, Search, ArrowRightLeft, Lock } from "lucide-react";
+import { Loader2, Save, Search, ArrowRightLeft, Lock, Building2 } from "lucide-react";
 import { toast } from "sonner";
-import { registerManualAdjustment, buscarProductoEnAlmacen } from "@/actions/inventory-actions"; // ✨ IMPORTAMOS EL NUEVO BUSCADOR
+import { registerManualAdjustment, buscarProductoEnAlmacen, getWarehousesByBranch } from "@/actions/inventory-actions"; 
 
 interface ManualEntryDialogProps {
     open: boolean;
@@ -25,16 +25,24 @@ export function ManualEntryDialog({ open, onOpenChange, branches, userRole, user
     const PRIVILEGED_ROLES = ['CEO', 'LOGISTICA', 'ADMINISTRADOR GENERAL', 'GERENTE GENERAL'];
     const canChangeBranch = PRIVILEGED_ROLES.includes(userRole);
 
+    // Estados de ubicación
     const [branchId, setBranchId] = useState(""); 
+    const [warehouses, setWarehouses] = useState<any[]>([]);
+    const [warehouseId, setWarehouseId] = useState("");
+    const [isLoadingWarehouses, setIsLoadingWarehouses] = useState(false);
+
+    // Estados del formulario
     const [type, setType] = useState("INGRESO"); 
     const [quantity, setQuantity] = useState(1);
     const [reason, setReason] = useState("");
     
+    // Estados del buscador
     const [searchTerm, setSearchTerm] = useState("");
     const [selectedProduct, setSelectedProduct] = useState<any>(null);
     const [searchResults, setSearchResults] = useState<any[]>([]);
     const [isSearching, setIsSearching] = useState(false);
 
+    // Inicializar modal
     useEffect(() => {
         if (open) {
             setReason("");
@@ -42,6 +50,8 @@ export function ManualEntryDialog({ open, onOpenChange, branches, userRole, user
             setSearchTerm("");
             setSelectedProduct(null);
             setType("INGRESO");
+            setWarehouses([]);
+            setWarehouseId("");
 
             if (userBranchId && userBranchId > 0) {
                 setBranchId(userBranchId.toString());
@@ -51,9 +61,37 @@ export function ManualEntryDialog({ open, onOpenChange, branches, userRole, user
         }
     }, [open, userBranchId]); 
 
-    // ✨ BUSCADOR SEGURO CONTRA LA BASE DE DATOS (Con protección contra bucles infinitos)
+    // Cargar almacenes cuando cambia la sucursal
+    useEffect(() => {
+        const fetchWarehouses = async () => {
+            if (branchId) {
+                setIsLoadingWarehouses(true);
+                const res = await getWarehousesByBranch(Number(branchId));
+                setWarehouses(res.data || []);
+                
+                // Si la sucursal tiene almacenes, autoseleccionar el primero
+                if (res.data && res.data.length > 0) {
+                    setWarehouseId(res.data[0].id.toString());
+                } else {
+                    setWarehouseId(""); // No tiene almacenes
+                }
+                setIsLoadingWarehouses(false);
+            } else {
+                setWarehouses([]);
+                setWarehouseId("");
+            }
+        };
+
+        if (open) {
+            fetchWarehouses();
+        }
+    }, [branchId, open]);
+
+    // Buscador de productos
     useEffect(() => {
         const fetchResults = async () => {
+            // Se busca usando branchId temporalmente para heredar la lógica anterior, 
+            // pero lo ideal es que busque en toda la BD si es un producto nuevo.
             if (searchTerm.length > 1 && !selectedProduct && branchId) {
                 setIsSearching(true);
                 const res = await buscarProductoEnAlmacen(Number(branchId), searchTerm);
@@ -70,7 +108,7 @@ export function ManualEntryDialog({ open, onOpenChange, branches, userRole, user
 
         const timer = setTimeout(() => {
             fetchResults();
-        }, 300); // Espera 300ms después de que dejas de escribir para no saturar la BD
+        }, 300);
 
         return () => clearTimeout(timer);
     }, [searchTerm, branchId, selectedProduct]);
@@ -87,14 +125,19 @@ export function ManualEntryDialog({ open, onOpenChange, branches, userRole, user
     };
 
     const handleSubmit = async () => {
-        if (!branchId) return toast.error("El almacén es obligatorio.");
+        if (!branchId) return toast.error("La sucursal es obligatoria.");
         if (!selectedProduct) return toast.error("Debes buscar y seleccionar un producto.");
         if (quantity <= 0) return toast.error("La cantidad debe ser mayor a 0.");
         if (!reason.trim()) return toast.error("Debes indicar un motivo.");
 
         setLoading(true);
         const formData = new FormData();
-        formData.append("branch_id", branchId); // Manda el warehouseId real
+        formData.append("branch_id", branchId); 
+        
+        // Enviamos el warehouseId si existe, de lo contrario enviamos vacío
+        // El backend debe estar preparado para procesar un ajuste sin almacén específico si así lo requieres
+        formData.append("warehouse_id", warehouseId); 
+        
         formData.append("product_id", selectedProduct.id.toString());
         formData.append("quantity", quantity.toString());
         formData.append("type", type);
@@ -121,15 +164,16 @@ export function ManualEntryDialog({ open, onOpenChange, branches, userRole, user
                     </DialogTitle>
                     <DialogDescription>
                         {canChangeBranch 
-                            ? "Selecciona el almacén y registra el movimiento."
-                            : "Registrando movimiento en tu almacén asignado."}
+                            ? "Selecciona la sucursal, el almacén y registra el movimiento."
+                            : "Registrando movimiento en tu sucursal asignada."}
                     </DialogDescription>
                 </DialogHeader>
 
                 <div className="space-y-4 py-2">
                     <div className="grid grid-cols-2 gap-4">
+                        {/* SELECTOR DE SUCURSAL */}
                         <div className="space-y-2">
-                            <Label>Almacén Físico</Label>
+                            <Label>Sucursal Principal</Label>
                             <div className="relative">
                                 <Select 
                                     value={branchId} 
@@ -141,7 +185,7 @@ export function ManualEntryDialog({ open, onOpenChange, branches, userRole, user
                                     disabled={!canChangeBranch}
                                 >
                                     <SelectTrigger className={!canChangeBranch ? "bg-gray-100 text-gray-600 font-medium opacity-100" : "bg-white"}>
-                                        <SelectValue placeholder={canChangeBranch ? "Seleccionar Almacén" : "Cargando..."} />
+                                        <SelectValue placeholder="Seleccionar Sucursal" />
                                     </SelectTrigger>
                                     <SelectContent>
                                         {branches.map(b => (
@@ -154,7 +198,41 @@ export function ManualEntryDialog({ open, onOpenChange, branches, userRole, user
                                 )}
                             </div>
                         </div>
-                        
+
+                        {/* SELECTOR DE ALMACÉN */}
+                        <div className="space-y-2">
+                            <Label>Almacén Físico</Label>
+                            <div className="relative">
+                                <Select 
+                                    value={warehouseId} 
+                                    onValueChange={setWarehouseId} 
+                                    disabled={!branchId || warehouses.length === 0 || isLoadingWarehouses}
+                                >
+                                    <SelectTrigger className={!branchId || warehouses.length === 0 ? "bg-gray-100 text-gray-400" : "bg-white"}>
+                                        {isLoadingWarehouses ? (
+                                            <div className="flex items-center gap-2"><Loader2 className="w-3 h-3 animate-spin" /> Cargando...</div>
+                                        ) : (
+                                            <SelectValue placeholder={warehouses.length === 0 && branchId ? "Sin almacén" : "Seleccionar Almacén"} />
+                                        )}
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {warehouses.length > 0 ? (
+                                            warehouses.map(w => (
+                                                <SelectItem key={w.id} value={w.id.toString()}>{w.name}</SelectItem>
+                                            ))
+                                        ) : (
+                                            <SelectItem value="none" disabled>No hay almacenes</SelectItem>
+                                        )}
+                                    </SelectContent>
+                                </Select>
+                                {warehouses.length === 0 && branchId && !isLoadingWarehouses && (
+                                    <Building2 className="w-3 h-3 text-gray-400 absolute right-8 top-3" />
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">
                             <Label>Tipo Movimiento</Label>
                             <Select value={type} onValueChange={setType}>
@@ -167,13 +245,23 @@ export function ManualEntryDialog({ open, onOpenChange, branches, userRole, user
                                 </SelectContent>
                             </Select>
                         </div>
+                        <div className="space-y-2">
+                            <Label>Cantidad ({selectedProduct?.unit_measure || 'UND'})</Label>
+                            <Input 
+                                type="number" 
+                                min="0.01" 
+                                step="0.01" 
+                                value={quantity} 
+                                onChange={e => setQuantity(parseFloat(e.target.value))} 
+                            />
+                        </div>
                     </div>
 
                     <div className="space-y-2 relative">
                         <Label>Producto</Label>
                         <div className="relative">
                             <Input 
-                                placeholder="Buscar en este almacén..." 
+                                placeholder="Buscar producto..." 
                                 value={searchTerm} 
                                 onChange={e => { setSearchTerm(e.target.value); if(!e.target.value) setSelectedProduct(null); }}
                                 className={selectedProduct ? "border-green-500 bg-green-50 text-green-700 font-medium pl-8" : "pl-8"}
@@ -206,20 +294,9 @@ export function ManualEntryDialog({ open, onOpenChange, branches, userRole, user
                         )}
                         {searchTerm.length > 1 && searchResults.length === 0 && !selectedProduct && !isSearching && branchId && (
                             <div className="absolute top-full left-0 w-full bg-white border rounded-md shadow-lg z-[100] p-3 text-center text-xs text-red-500 mt-1">
-                                El producto no existe en este almacén.
+                                No encontrado (Verifique el catálogo)
                             </div>
                         )}
-                    </div>
-
-                    <div className="space-y-2">
-                        <Label>Cantidad ({selectedProduct?.unit_measure || 'UND'})</Label>
-                        <Input 
-                            type="number" 
-                            min="0.01" 
-                            step="0.01" 
-                            value={quantity} 
-                            onChange={e => setQuantity(parseFloat(e.target.value))} 
-                        />
                     </div>
 
                     <div className="space-y-2">

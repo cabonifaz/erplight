@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Loader2, ArrowRightLeft } from "lucide-react";
@@ -23,24 +23,42 @@ export function TransferStockDialog({
 }) {
     const [loading, setLoading] = useState(false);
     const [formData, setFormData] = useState({
+        fromBranch: 0, // ✨ NUEVO: Guardará la sucursal origen
         toBranch: 0,
         productId: 0,
         quantity: '',
         reason: ''
     });
 
+    // ✨ Sincronizar el formulario cada vez que se abre el modal
+    useEffect(() => {
+        if (isOpen) {
+            setFormData({
+                fromBranch: sucursalActualId || (sucursales.length > 0 ? sucursales[0].id : 0),
+                toBranch: 0,
+                productId: 0,
+                quantity: '',
+                reason: ''
+            });
+        }
+    }, [isOpen, sucursalActualId, sucursales]);
+
     const handleTransfer = async () => {
-        if (!formData.toBranch || !formData.productId || !formData.quantity) {
-            return alert("Por favor completa los campos obligatorios (Destino, Producto y Cantidad).");
+        if (!formData.fromBranch || !formData.toBranch || !formData.productId || !formData.quantity) {
+            return alert("Por favor completa los campos obligatorios (Origen, Destino, Producto y Cantidad).");
         }
         
+        if (Number(formData.fromBranch) === Number(formData.toBranch)) {
+            return alert("La sucursal de origen y destino no pueden ser la misma.");
+        }
+
         if (Number(formData.quantity) <= 0) {
             return alert("La cantidad debe ser mayor a 0.");
         }
 
         setLoading(true);
         const res = await transferirStockSucursal({
-            fromBranch: sucursalActualId,
+            fromBranch: formData.fromBranch, // ✨ Ahora usa el valor seleccionado en el combo
             toBranch: formData.toBranch,
             productId: formData.productId,
             quantity: Number(formData.quantity),
@@ -51,15 +69,14 @@ export function TransferStockDialog({
             alert("✅ " + res.message);
             onSuccess(); // Recarga la tabla de inventario
             onOpenChange(false);
-            setFormData({ toBranch: 0, productId: 0, quantity: '', reason: '' });
         } else {
             alert("❌ Error: " + res.message);
         }
         setLoading(false);
     };
 
-    // ✨ CORRECCIÓN AQUÍ: Forzamos la conversión a Number() para evitar fallos de tipos (String vs Int)
-    const sucursalesDestino = sucursales.filter(s => Number(s.id) !== Number(sucursalActualId));
+    // ✨ El destino excluye dinámicamente la sucursal de origen seleccionada
+    const sucursalesDestino = sucursales.filter(s => Number(s.id) !== Number(formData.fromBranch));
 
     return (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
@@ -70,21 +87,36 @@ export function TransferStockDialog({
                         Trasladar Stock
                     </DialogTitle>
                     <DialogDescription>
-                        Envía insumos desde esta sede hacia otra sucursal.
+                        Envía insumos desde una sede origen hacia otra sucursal.
                     </DialogDescription>
                 </DialogHeader>
 
                 <div className="space-y-4">
-                    <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-1">Sucursal Destino <span className="text-red-500">*</span></label>
-                        <select 
-                            className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
-                            value={formData.toBranch}
-                            onChange={(e) => setFormData({...formData, toBranch: Number(e.target.value)})}
-                        >
-                            <option value={0} disabled>-- Selecciona la sede destino --</option>
-                            {sucursalesDestino.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                        </select>
+                    {/* ✨ NUEVO: SELECTOR DE SUCURSAL ORIGEN */}
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">Sucursal Origen <span className="text-red-500">*</span></label>
+                            <select 
+                                className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 bg-gray-50"
+                                value={formData.fromBranch}
+                                onChange={(e) => setFormData({...formData, fromBranch: Number(e.target.value), toBranch: 0})}
+                            >
+                                <option value={0} disabled>-- Origen --</option>
+                                {sucursales.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                            </select>
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">Sucursal Destino <span className="text-red-500">*</span></label>
+                            <select 
+                                className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                                value={formData.toBranch}
+                                onChange={(e) => setFormData({...formData, toBranch: Number(e.target.value)})}
+                            >
+                                <option value={0} disabled>-- Destino --</option>
+                                {sucursalesDestino.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                            </select>
+                        </div>
                     </div>
 
                     <div>

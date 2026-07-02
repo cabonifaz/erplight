@@ -7,6 +7,8 @@ import { ManualEntryDialog } from "./manual-entry-dialog";
 import { TransferStockDialog } from "./transfer-stock-dialog"; 
 import * as XLSX from "xlsx";
 import { procesarAjusteInventarioExcel } from "@/actions/inventory-actions";
+// ✨ 1. AGREGA ESTA LÍNEA AQUÍ
+import { CreateProductModal } from "./create-product-modal";
 
 interface InventoryActionsButtonProps {
     branches?: any[]; // En realidad son Warehouses
@@ -114,9 +116,13 @@ export function InventoryActionsButton({
         if (fileInputRef.current) fileInputRef.current.value = ""; 
     };
 
-    return (
+return (
         <>
             <div className="flex flex-wrap items-center gap-3">
+                
+                {/* ✨ 2. AGREGA EL BOTÓN AQUÍ */}
+                <CreateProductModal />
+
                 <Button 
                     type="button" 
                     onClick={() => setOpen(true)} 

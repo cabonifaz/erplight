@@ -61,12 +61,15 @@ export async function registerManualAdjustment(formData: FormData) {
         return { success: false, message: "⛔ Sin permisos para realizar ajustes." };
     }
 
-    // 2. Extracción de Datos
+    // 2. Extracción de Datos EXACTA de tu nuevo Modal
     const product_id = Number(formData.get("product_id"));
     const quantity = parseFloat(formData.get("quantity") as string);
     const type = formData.get("type") as string;
     const reason = formData.get("reason") as string;
-    const formWarehouseId = Number(formData.get("branch_id")); // ID del Almacén físico
+    
+    // ✨ RECIBIMOS AMBOS DESDE EL MODAL
+    const inputBranchId = Number(formData.get("branch_id")); 
+    const inputWarehouseId = Number(formData.get("warehouse_id")); 
 
     if (!product_id || isNaN(quantity) || !type || !reason) {
         return { success: false, message: "Todos los campos son obligatorios." };
@@ -77,66 +80,71 @@ export async function registerManualAdjustment(formData: FormData) {
         await connection.beginTransaction();
 
         // 3. Determinar IDs de Sede y Almacén
-        let targetWarehouseId: number;
         let targetBranchId: number;
+        let targetWarehouseId: number | null = null;
 
         if (PRIVILEGED_ROLES.includes(role)) {
-            if (!formWarehouseId) throw new Error("Debes seleccionar un almacén.");
-            const [wData]: any = await connection.query("SELECT branch_id FROM warehouses WHERE id = ?", [formWarehouseId]);
-            if (wData.length === 0) throw new Error("El almacén seleccionado no existe.");
-            targetWarehouseId = formWarehouseId;
-            targetBranchId = wData[0].branch_id;
+            if (!inputBranchId) throw new Error("Debes seleccionar una sucursal.");
+            targetBranchId = inputBranchId;
+            targetWarehouseId = inputWarehouseId || null; // Puede ser null si no hay almacenes
         } else {
             if (!sessionBranchId) throw new Error("⛔ No tienes una sucursal asignada.");
             targetBranchId = sessionBranchId;
-            if (!formWarehouseId) {
+            
+            if (!inputWarehouseId) {
+                // Autoseleccionar el primer almacén de su sucursal si no manda uno
                 const [wData]: any = await connection.query("SELECT id FROM warehouses WHERE branch_id = ? ORDER BY id ASC LIMIT 1", [sessionBranchId]);
-                if (wData.length === 0) throw new Error("Tu sucursal no tiene almacenes.");
-                targetWarehouseId = wData[0].id;
+                targetWarehouseId = wData.length > 0 ? wData[0].id : null;
             } else {
-                targetWarehouseId = formWarehouseId;
+                targetWarehouseId = inputWarehouseId;
             }
         }
 
-        // ✅ DESPUÉS (código corregido):
-// 4. Lógica de Existencia — buscar por branch_id (la clave única real)
-const [existing]: any = await connection.query(
-    `SELECT id, stock_current 
-     FROM product_stocks 
-     WHERE branch_id = ? AND product_id = ? 
-     LIMIT 1`, 
-    [targetBranchId, product_id]  // ✅ coincide con el UNIQUE KEY real
-);
+        // 4. Lógica de Existencia — buscar por branch_id (la clave única real)
+        const [existing]: any = await connection.query(
+            `SELECT id, stock_current 
+             FROM product_stocks 
+             WHERE branch_id = ? AND product_id = ? 
+             LIMIT 1`, 
+            [targetBranchId, product_id] 
+        );
 
-if (existing.length === 0) {
-    if (type === 'SALIDA') {
-        throw new Error("No puedes registrar una salida de un producto sin stock.");
-    }
-    await connection.query(
-        `INSERT INTO product_stocks 
-         (branch_id, warehouse_id, product_id, stock_current, min_stock, max_stock, reorder_point, last_update) 
-         VALUES (?, ?, ?, 0, 5, 100, 10, NOW())`,
-        [targetBranchId, targetWarehouseId, product_id]  // ✅ sin riesgo de duplicate
-    );
-} else if (type === 'SALIDA' && existing[0].stock_current < quantity) {
-    throw new Error(`Stock insuficiente. Tienes ${existing[0].stock_current} unidades.`);
-}
+        if (existing.length === 0) {
+            if (type === 'SALIDA') {
+                throw new Error("No puedes registrar una salida de un producto sin stock.");
+            }
+            await connection.query(
+                `INSERT INTO product_stocks 
+                 (branch_id, warehouse_id, product_id, stock_current, min_stock, max_stock, reorder_point, last_update) 
+                 VALUES (?, ?, ?, ?, 5, 100, 10, NOW())`,
+                [targetBranchId, targetWarehouseId, product_id, quantity] // ✅ Se inserta la cantidad inicial
+            );
+        } else if (type === 'SALIDA' && existing[0].stock_current < quantity) {
+            throw new Error(`Stock insuficiente. Tienes ${existing[0].stock_current} unidades.`);
+        } else {
+            // 5. Aplicar Movimiento — UPDATE 
+            const operator = type === 'INGRESO' ? '+' : '-';
+            
+            // Si targetWarehouseId es null, mantenemos el que ya tenía. Si no, lo actualizamos.
+            const warehouseUpdateClause = targetWarehouseId ? `warehouse_id = ?,` : ``;
+            const updateParams = targetWarehouseId 
+                ? [quantity, targetWarehouseId, targetBranchId, product_id]
+                : [quantity, targetBranchId, product_id];
 
-// 5. Aplicar Movimiento — UPDATE directo sin segunda consulta de búsqueda
-const operator = type === 'INGRESO' ? '+' : '-';
-await connection.query(
-    `UPDATE product_stocks 
-     SET stock_current = stock_current ${operator} ?,
-         warehouse_id  = ?,          -- ✅ actualiza ubicación física
-         last_update   = NOW()
-     WHERE branch_id = ? AND product_id = ?`,  // ✅ por la clave única real
-    [quantity, targetWarehouseId, targetBranchId, product_id]
-);
+            await connection.query(
+                `UPDATE product_stocks 
+                 SET stock_current = stock_current ${operator} ?,
+                     ${warehouseUpdateClause}
+                     last_update   = NOW()
+                 WHERE branch_id = ? AND product_id = ?`, 
+                updateParams
+            );
+        }
 
         // 6. Auditoría
         await connection.query(
-            "INSERT INTO inventory_movements (branch_id, product_id, user_id, type, concept, description, quantity, created_at) VALUES (?, ?, ?, ?, 'AJUSTE MANUAL', ?, ?, NOW())",
-            [targetBranchId, product_id, session.user.id, type, reason, quantity]
+            "INSERT INTO inventory_movements (branch_id, warehouse_id, product_id, user_id, type, concept, description, quantity, created_at) VALUES (?, ?, ?, ?, ?, 'AJUSTE MANUAL', ?, ?, NOW())",
+            [targetBranchId, targetWarehouseId, product_id, session.user.id, type, reason, quantity]
         );
 
         await connection.commit();
@@ -361,5 +369,19 @@ export async function reasignarAlmacenFisico(stockId: number, nuevoWarehouseId: 
         return { success: false, message: "Error al reubicar: " + error.message };
     } finally {
         connection.release();
+    }
+}
+
+export async function getWarehousesByBranch(branchId: number) {
+    try {
+        const { pool } = await import("@/lib/db");
+        const [rows]: any = await pool.query(
+            "SELECT id, name FROM warehouses WHERE branch_id = ? AND status = 1", 
+            [branchId]
+        );
+        return { success: true, data: rows };
+    } catch (error) {
+        console.error("Error obteniendo almacenes:", error);
+        return { success: false, data: [] };
     }
 }
